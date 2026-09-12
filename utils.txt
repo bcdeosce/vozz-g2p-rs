@@ -1,0 +1,7 @@
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
+
+export CARGO_TARGET_DIR=/tmp/vozz-g2p-rs
+cargo test

@@ -1,0 +1,222 @@
+====================================================================================================
+RELATÓRIO — vozz-js x vozz-rs x espeak-ng pt-br
+====================================================================================================
+Corpus: /home/phnericampos/vozz-g2p-rs/corpus.txt (hash=835bf7493105f211)
+Palavras únicas (fonetização pura): 336542
+Descartadas (precisam normalização): 1283
+
+TEMPOS
+  rs loop     :     3482.0 ms
+  Léxico      : 255648 entradas
+
+SUMÁRIO
+  vozz-js vs vozz-rs    172831/336542  = 51.35%  (sem saída: 204)
+  vozz-rs vs espeak     292844/336542  = 87.02%  (sem saída: 0)
+  vozz-js vs espeak     167109/336746  = 49.62%  (sem saída: 0)
+
+====================================================================================================
+vozz-js vs vozz-rs — 163711 divergências
+====================================================================================================
+
+CATEGORIAS
+  acento-secundario           77007  ( 47.0%)
+  1-char-len                  38028  ( 23.2%)
+  1-char-diff                 17593  ( 10.7%)
+  2-char-len                  11012  (  6.7%)
+  posicao-acento               5832  (  3.6%)
+  acento-primario              5057  (  3.1%)
+  varios-chars-diff            3648  (  2.2%)
+  2-char-diff                  3631  (  2.2%)
+  3-char-diff                  1347  (  0.8%)
+  3-char-len                    536  (  0.3%)
+  estrutural                     20  (  0.0%)
+
+EXEMPLOS POR CATEGORIA (até 3 cada)
+
+  [acento-secundario] 77007 ocorrências
+    aaleniano          ˌaaleniˈɐ̃nʊ                           → ˌaalˌeniˈɐ̃nʊ
+    abacalhoado        ˌabakaljoˈadʊ                          → ˌabakˌaljoˈadʊ
+    abacalhoar         ˌabakaljoˈar                           → ˌabakˌaljoˈar
+
+  [1-char-len] 38028 ocorrências
+    abacateiral        ˌabakateɪɾˈaʊ                          → ˌabakˌateɪɾˈaw
+    abacaxizal         ˌabakaʃizˈaʊ                           → ˌabakˌaʃizˈaw
+    abadecídio         ˌabadesˈidʒiʊ                          → ˌabadesˈidjʊ
+
+  [1-char-diff] 17593 ocorrências
+    aal                aˈaʊ                                   → aˈaw
+    aalênio            ˌaalˈeniʊ                              → ˌaalˈenjʊ
+    ababil             ˌababˈiʊ                               → ˌababˈiw
+
+  [2-char-len] 11012 ocorrências
+    abafam             abˈafɐ̃ŋ                               → ˌabˈafɐ̃ʊ̃
+    abaixam            abˈaɪʃɐ̃ŋ                              → ˌabˈaɪʃɐ̃ʊ̃
+    abalam             abˈalɐ̃ŋ                               → ˌabˈalɐ̃ʊ̃
+
+  [posicao-acento] 5832 ocorrências
+    abafai             abˈafaɪ                                → ˌabafˈaɪ
+    abafei             abˈafeɪ                                → ˌabafˈeɪ
+    abaixai            abˈaɪʃaɪ                               → ˌabaɪʃˈaɪ
+
+  [acento-primario] 5057 ocorrências
+    abafarei           ˌabafˈaɾeɪ                             → ˌabafaɾˈeɪ
+    abaixarei          ˌabaɪʃˈaɾeɪ                            → ˌabaɪʃaɾˈeɪ
+    abalancei          ˌabalˈɐ̃ŋseɪ                           → ˌabalɐ̃ŋsˈeɪ
+
+  [varios-chars-diff] 3648 ocorrências
+    abalançou          ˌabalˈɐ̃ŋsoʊ                           → ˌabalɐ̃ŋsˈow
+    abalizou           ˌabalˈizoʊ                             → ˌabalizˈow
+    abanai             abˈɐ̃naɪ                               → ˌabænˈaɪ
+
+  [2-char-diff] 3631 ocorrências
+    abadágio           ˌabadˈaʒiʊ                             → ˌabadˈaɡjʊ
+    aberrância         ˌabexˈɐ̃ŋsiæ                           → ˌabexˈɐ̃ŋkjæ
+    abietário          ˌabietˈaɾiʊ                            → ˌabjetˈaɾjʊ
+
+  [3-char-diff] 1347 ocorrências
+    abalroou           ˌabaʊrˈooʊ                             → ˌabaʊroˈow
+    abaluaiê           ˌabaluaɪˈe                             → ˌabalwaˈje
+    abençoou           ˌabeɪŋsˈooʊ                            → ˌabeɪŋsoˈow
+
+  [3-char-len] 536 ocorrências
+    acabrunhariam      ˌakabruɲaɾˈiɐ̃ŋ                        → ˌakabrˌũɲaɾˈiɐ̃ʊ̃
+    acabrunharão       ˌakabruɲaɾˈɐ̃ʊ                         → ˌakabrˌũɲaɾˈɐ̃ʊ̃
+    academicizariam    ˌakademisizaɾˈiɐ̃ŋ                     → ˌakadˌemisˌizaɾˈiɐ̃ʊ̃
+
+====================================================================================================
+vozz-rs vs espeak — 43698 divergências
+====================================================================================================
+
+CATEGORIAS
+  1-char-diff                 25095  ( 57.4%)
+  1-char-len                  11943  ( 27.3%)
+  2-char-diff                  2650  (  6.1%)
+  2-char-len                   1033  (  2.4%)
+  3-char-diff                   979  (  2.2%)
+  acento-primario               789  (  1.8%)
+  varios-chars-diff             497  (  1.1%)
+  acento-secundario             475  (  1.1%)
+  posicao-acento                102  (  0.2%)
+  estrutural                     83  (  0.2%)
+  3-char-len                     52  (  0.1%)
+
+EXEMPLOS POR CATEGORIA (até 3 cada)
+
+  [1-char-diff] 25095 ocorrências
+    triunfarias        trˌiʊ̃ŋfaɾˈiæs                         → trˌiũŋfaɾˈiæs
+    trasfego           trˌasfˈeɡʊ                             → trˌasfˈɛɡʊ
+    rebocas            xˌebˈokæs                              → xˌebˈɔkæs
+
+  [1-char-len] 11943 ocorrências
+    mixedematoso       mˌiʃedˌematˈozʊ                        → mˌiksedˌematˈozʊ
+    arruinamento       ˌaxuɪnæmˈeɪŋtʊ                         → ˌaxuˌinæmˈeɪŋtʊ
+    anostomídeo        ˌænostomˈideʊ                          → ˌænostomˈidʒjʊ
+
+  [2-char-diff] 2650 ocorrências
+    confeccionaríeis   kˌoŋfekkˌjonaɾˈieɪs                    → kˌoŋfeksˌionaɾˈieɪs
+    silvestres         sˌiwvˈestrys                           → sˌiʊvˈɛstrys
+    bacteriófago       bˌakteɾˈjɔfæɡʊ                         → bˌakteɾiˈɔfæɡʊ
+
+  [2-char-len] 1033 ocorrências
+    sequenciarás       sˌekeɪŋkjaɾˈas                         → sˌekweɪŋsˌiaɾˈas
+    antielapíneo       ˌɐ̃ŋtjelapˈineʊ                        → ˌɐ̃ŋtʃiˌelapˈineʊ
+    reincidias         xˌeɪɪ̃ŋsidʒˈiæs                        → xˌeiŋsidʒˈiæs
+
+  [3-char-diff] 979 ocorrências
+    cianófita          kˌjanˈɔfitæ                            → sˌiænˈɔfitæ
+    retribuirmos       xˌetribˈuɪɾəmʊs                        → xˌetribuˈiɾəmʊs
+    auxiliáreis        ˌaʊʃilˈjaɾeɪs                          → ˌaʊsiliˈaɾeɪs
+
+  [acento-primario] 789 ocorrências
+    me                 my                                     → mˈy
+    conceituásseis     kˌoŋseɪtˈwaseɪs                        → kˌoŋseɪtwˈaseɪs
+    efusiômetro        ˌefuzˈjometrʊ                          → ˌefuzjˈometrʊ
+
+  [varios-chars-diff] 497 ocorrências
+    nelson             neʊsˈoŋ                                → nˈɛʊsoŋ
+    ãã                 ˈɐ̃ã                                  → ɐ̃ˈɐ̃
+    canaãense          kˌænaˈɐ̃ɪ̃ŋsy                          → kˌænaɐ̃ˈeɪŋsy
+
+  [acento-secundario] 475 ocorrências
+    regulamentaste     xˌeɡulæmeɪŋtˈastʃy                     → xˌeɡulˌæmeɪŋtˈastʃy
+    orgulhosamente     ˌoɾəɡuljozæmˈeɪŋtʃy                    → ˌoɾəɡuljˌozæmˈeɪŋtʃy
+    angustiarei        ˌɐ̃ŋɡustʃiaɾˈeɪ                        → ˌɐ̃ŋɡustʃˌiaɾˈeɪ
+
+  [posicao-acento] 102 ocorrências
+    regula             xˈeɡulæ                                → xˌeɡˈulæ
+    sangangu           sˈɐ̃ŋɡɐ̃ŋɡu                            → sˌɐ̃ŋɡɐ̃ŋɡˈu
+    degusta            dˈeɡustæ                               → dˌeɡˈustæ
+
+  [estrutural] 83 ocorrências
+    ldl                ˈwdw                                   → ˌɛlydˌeˈɛly
+    ngf                ˈŋɡf                                   → ˌeneʒˌeˈɛfy
+    vldl               ˈvwdw                                  → vˌeˌɛlydˌeˈɛly
+
+====================================================================================================
+vozz-js vs espeak — 169637 divergências
+====================================================================================================
+
+CATEGORIAS
+  acento-secundario           72668  ( 42.8%)
+  1-char-len                  45190  ( 26.6%)
+  1-char-diff                 21252  ( 12.5%)
+  2-char-len                  12111  (  7.1%)
+  posicao-acento               6135  (  3.6%)
+  acento-primario              5298  (  3.1%)
+  varios-chars-diff            3865  (  2.3%)
+  2-char-diff                  1637  (  1.0%)
+  3-char-diff                   733  (  0.4%)
+  3-char-len                    610  (  0.4%)
+  estrutural                    138  (  0.1%)
+
+EXEMPLOS POR CATEGORIA (até 3 cada)
+
+  [acento-secundario] 72668 ocorrências
+    14                 katˈoɾəzy                              → kˌatˈoɾəzy
+    18                 dezˈoɪtʊ                               → dˌezˈoɪtʊ
+    60                 sesˈeɪŋtæ                              → sˌesˈeɪŋtæ
+
+  [1-char-len] 45190 ocorrências
+    21                 vˈiŋtʃy i ũŋ                          → vˈiŋtʃyiˈũŋ
+    24                 vˈiŋtʃy i kˈatrʊ                       → vˈiŋtʃyikwˈatrʊ
+    31                 trˈiŋtæ i ũŋ                          → trˈiŋtæiˈũŋ
+
+  [1-char-diff] 21252 ocorrências
+    10                 dˈes                                   → dˈɛs
+    17                 dˌezesˈetʃy                            → dˌezesˈɛtʃy
+    19                 dˌezenˈovy                             → dˌezenˈɔvy
+
+  [2-char-len] 12111 ocorrências
+    22                 vˈiŋtʃy i dˈoɪs                        → vˈiŋtʃyidˈoɪs
+    23                 vˈiŋtʃy i trˈes                        → vˈiŋtʃyitrˈes
+    25                 vˈiŋtʃy i sˈiŋkʊ                       → vˈiŋtʃyisˈiŋkʊ
+
+  [posicao-acento] 6135 ocorrências
+    abafai             abˈafaɪ                                → ˌabafˈaɪ
+    abafei             abˈafeɪ                                → ˌabafˈeɪ
+    abaixai            abˈaɪʃaɪ                               → ˌabaɪʃˈaɪ
+
+  [acento-primario] 5298 ocorrências
+    abafarei           ˌabafˈaɾeɪ                             → ˌabafaɾˈeɪ
+    abaixarei          ˌabaɪʃˈaɾeɪ                            → ˌabaɪʃaɾˈeɪ
+    abalancei          ˌabalˈɐ̃ŋseɪ                           → ˌabalɐ̃ŋsˈeɪ
+
+  [varios-chars-diff] 3865 ocorrências
+    42                 kaɾˈeɪŋtæ i dˈoɪs                      → kwˌaɾˈeɪŋtæidˈoɪs
+    43                 kaɾˈeɪŋtæ i trˈes                      → kwˌaɾˈeɪŋtæitrˈes
+    45                 kaɾˈeɪŋtæ i sˈiŋkʊ                     → kwˌaɾˈeɪŋtæisˈiŋkʊ
+
+  [2-char-diff] 1637 ocorrências
+    180                sˈeɪŋtʊ i oɪtˈeɪŋtæ                    → sˈeɪŋtuˌi oɪtˈeɪŋtæ
+    abiurana           ˌabiʊɾˈɐ̃næ                            → ˌabjuɾˈɐ̃næ
+    abluiu             ablˈuiʊ                                → ablwˈiʊ
+
+  [3-char-diff] 733 ocorrências
+    3d                 trˈez ˈdʒ                              → trˈez dˈe
+    abacatuia          ˌabakatuˈiæ                            → ˌabakatˈuɪæ
+    abalroai           ˌabaʊrˈoaɪ                             → ˌabaʊxoˈaɪ
+
+  [3-char-len] 610 ocorrências
+    1973               mˈiʊ, nˌovesˈeɪŋtʊz i setˈeɪŋtæ ...    → mˈiʊ nˈɔvysˈeɪŋtʊzˌi setˈeɪŋtæit...
+    1x                 ũŋ ˈs                                 → ˈũŋ ʃˈis
+    200ml              duzˈeɪŋtʊz mˌililˈitrʊs                → dˌuzˈeɪŋtʊz ˌemeˈɛly
