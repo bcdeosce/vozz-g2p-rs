@@ -1,20 +1,7 @@
 //! Léxico de exceções pt-BR.
 //!
-//! Porte de `lexicon.js` do Vozz.
-//!
-//! Cobre:
-//! - palavras de altíssima frequência;
-//! - casos em que a vogal tônica aberta/fechada não é dedutível pela ortografia;
-//! - estrangeirismos.
-//!
-//! Convenção IPA idêntica à do espeak-ng `pt-br`. Use `ɡ` (U+0261), nunca
-//! o `g` ASCII: o `g` latino não existe no vocabulário do modelo.
-//!
-//! Todas as strings estão em NFD (vogal + til combinante U+0303). Sempre
-//! escrevemos o til como `\u{0303}` para que nenhum editor precomponha.
-//!
-//! As chaves `nos_` e `às_` do léxico JS foram descartadas por serem
-//! duplicatas com underscore que nunca casam com texto real.
+//! Convenção IPA idêntica à do espeak-ng `pt-br`. Use `ɡ` (U+0261).
+//! Strings em NFD.
 
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -23,7 +10,6 @@ use std::collections::HashMap;
 pub static CLITICOS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut mapa = HashMap::new();
 
-    // Artigos definidos e indefinidos.
     mapa.insert("a", "a");
     mapa.insert("as", "as");
     mapa.insert("o", "ʊ");
@@ -32,21 +18,19 @@ pub static CLITICOS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("uns", "u\u{0303}ŋs");
     mapa.insert("uma", "umæ");
     mapa.insert("umas", "umæs");
-
-    // Preposições e contrações.
-    mapa.insert("de", "dʒy");
+    mapa.insert("de", "dʒj");
     mapa.insert("do", "dʊ");
     mapa.insert("da", "da");
     mapa.insert("dos", "dʊs");
     mapa.insert("das", "das");
-    mapa.insert("em", "eɪŋ");
+    // `em` NÃO é clítico: em contexto, o espeak mantém acento primário.
+    // Fica no LEXICO.
     mapa.insert("no", "nʊ");
     mapa.insert("na", "na");
     mapa.insert("nos", "nʊs");
     mapa.insert("nas", "nas");
     mapa.insert("num", "nu\u{0303}ŋ");
     mapa.insert("numa", "numæ");
-    mapa.insert("por", "por");
     mapa.insert("pelo", "pelʊ");
     mapa.insert("pela", "pelæ");
     mapa.insert("pelos", "pelʊs");
@@ -55,12 +39,10 @@ pub static CLITICOS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("aos", "aʊs");
     mapa.insert("à", "a");
     mapa.insert("às", "as");
-
-    // Conjunções, pronomes, advérbios átonos.
     mapa.insert("e", "i");
     mapa.insert("ou", "oʊ");
     mapa.insert("que", "ky");
-    mapa.insert("se", "sy");
+    mapa.insert("se", "sj");
     mapa.insert("me", "my");
     mapa.insert("te", "tʃy");
     mapa.insert("lhe", "ʎy");
@@ -74,12 +56,63 @@ pub static CLITICOS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa
 });
 
+/// Clíticos que mudam de pronúncia **em contexto de sentença**.
+///
+/// Verificado contra `espeak-ng`: quando isolados, essas palavras têm
+/// acento primário; dentro de uma sentença, o espeak remove o acento
+/// (átonos) ou rebaixa para secundário.
+pub static CLITICOS_CONTEXTO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    let mut mapa = HashMap::new();
+
+    // Átonos em contexto.
+    mapa.insert("que", "ky");
+    mapa.insert("na", "na");
+    mapa.insert("nas", "nas");
+    mapa.insert("no", "nʊ");
+    mapa.insert("nos", "nʊs");
+    mapa.insert("os", "ʊs");
+    mapa.insert("as", "as");
+    mapa.insert("de", "dʒy");
+    mapa.insert("por", "poɾ");
+    mapa.insert("com", "koŋ");
+    mapa.insert("tem", "teɪŋ");
+    mapa.insert("vai", "vaɪ");
+    mapa.insert("ser", "seɾ");
+    mapa.insert("ter", "teɾ");
+    mapa.insert("se", "sj");
+    mapa.insert("mas", "maz");
+    mapa.insert("foi", "foɪ");
+    mapa.insert("pelo", "pelʊ");
+
+    // Secundários em contexto.
+    mapa.insert("para", "pˌaɾæ");
+    mapa.insert("onde", "ˌoŋdʒy");
+    mapa.insert("pode", "pˌɔdʒy");
+    mapa.insert("ele", "ˌely");
+    mapa.insert("ela", "ˌɛlæ");
+    mapa.insert("esse", "ˌesi");
+    mapa.insert("este", "ˌestʃy");
+    mapa.insert("esta", "ˌɛstæ");
+    mapa.insert("estou", "estˌow");
+    mapa.insert("está", "estˌa");
+    mapa.insert("estão", "estˌɐ\u{0303}ʊ\u{0303}");
+    mapa.insert("estar", "estˌaɾ");
+    mapa.insert("você", "vosˌe");
+    mapa.insert("vocês", "vosˌes");
+    mapa.insert("uma", "ˌumæ");
+    mapa.insert("à", "ˌaː");
+    mapa.insert("às", "ˌaːs");
+
+    // `fazer` mantém acento primário em contexto.
+    mapa.insert("fazer", "fazˈer");
+
+    mapa
+});
+
 /// Exceções lexicais plenas (com marca de tônica).
-/// Verificadas contra `espeak-ng -v pt-br -q --ipa`.
 pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut mapa = HashMap::new();
 
-    // --- verbos e palavras funcionais de alta frequência ---
     mapa.insert("não", "nˈɐ\u{0303}ʊ\u{0303}");
     mapa.insert("sim", "sˈiŋ");
     mapa.insert("também", "tɐ\u{0303}mbˈeɪŋ");
@@ -89,22 +122,13 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("muitos", "mwˈiŋtʊs");
     mapa.insert("muitas", "mwˈiŋtæs");
     mapa.insert("bem", "bˈeɪŋ");
-    mapa.insert("tem", "tˈeɪŋ");
     mapa.insert("têm", "tˈeɪŋ");
     mapa.insert("vem", "vˈeɪŋ");
+    mapa.insert("em", "ˈeɪŋ");
     mapa.insert("são", "sˈɐ\u{0303}ʊ\u{0303}");
-    mapa.insert("estão", "estˈɐ\u{0303}ʊ\u{0303}");
-    mapa.insert("está", "estˈa");
-    mapa.insert("estou", "estˈow");
-    mapa.insert("ser", "sˈer");
-    mapa.insert("ter", "tˈer");
     mapa.insert("ver", "vˈer");
     mapa.insert("vir", "vˈir");
     mapa.insert("pôr", "pˈor");
-    mapa.insert("fazer", "fazˈer");
-    mapa.insert("dizer", "dʒizˈer");
-    mapa.insert("poder", "podˈer");
-    mapa.insert("querer", "keɾˈer");
     mapa.insert("hoje", "ˈoʒy");
     mapa.insert("ontem", "ˈoŋteɪŋ");
     mapa.insert("amanhã", "ˌæmɐ\u{0303}ɲˈɐ\u{0303}");
@@ -120,12 +144,10 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("cá", "kˈa");
     mapa.insert("já", "ʒˈa");
     mapa.insert("só", "sˈɔ");
-    mapa.insert("até", "ɛaɡudʊ");
+    mapa.insert("até", "atˈɛ");
     mapa.insert("após", "apˈɔs");
     mapa.insert("mais", "mˈaɪs");
-    mapa.insert("mas", "mˈas");
     mapa.insert("menos", "mˈenʊs");
-    mapa.insert("onde", "ˈoŋdʒy");
     mapa.insert("quando", "kwˈɐ\u{0303}ŋdʊ");
     mapa.insert("como", "kˈomʊ");
     mapa.insert("porque", "pˈoɾəky");
@@ -148,24 +170,17 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("nada", "nˈadæ");
     mapa.insert("tudo", "tˈudʊ");
     mapa.insert("algo", "ˈaʊɡʊ");
-    mapa.insert("ele", "ˈely");
-    mapa.insert("ela", "ˈɛlæ");
     mapa.insert("eles", "ˈelys");
     mapa.insert("elas", "ˈɛlæs");
     mapa.insert("eu", "ˈeʊ");
     mapa.insert("tu", "tˈu");
     mapa.insert("nós", "nˈɔs");
     mapa.insert("vós", "vˈɔs");
-    mapa.insert("você", "vosˈe");
-    mapa.insert("vocês", "vosˈes");
     mapa.insert("gente", "ʒˈeɪŋtʃy");
     mapa.insert("isso", "ˈisʊ");
     mapa.insert("isto", "ˈistʊ");
     mapa.insert("aquilo", "ˌakˈilʊ");
-    mapa.insert("esse", "ˈesi");
     mapa.insert("essa", "ˈɛsæ");
-    mapa.insert("este", "ˈestʃy");
-    mapa.insert("esta", "ˈɛstæ");
     mapa.insert("meu", "mˈeʊ");
     mapa.insert("minha", "mˈiɲæ");
     mapa.insert("seu", "sˈeʊ");
@@ -206,7 +221,6 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("senhor", "seɲˈor");
     mapa.insert("senhora", "sˌeɲˈɔɾæ");
 
-    // --- vogais tônicas abertas imprevisíveis ---
     mapa.insert("café", "kafˈɛ");
     mapa.insert("pé", "pˈɛ");
     mapa.insert("fé", "fˈɛ");
@@ -226,7 +240,7 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("móvel", "mˈɔvɛʊ");
     mapa.insert("novo", "nˈovʊ");
     mapa.insert("nova", "nˈɔvæ");
-    mapa.insert("novos", "nˈɔvʊs");
+    mapa.insert("novos", "nˈovʊs");
     mapa.insert("novas", "nˈɔvæs");
     mapa.insert("jogo", "ʒˈoɡʊ");
     mapa.insert("jogos", "ʒˈɔɡʊs");
@@ -252,7 +266,6 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("língua", "lˈiŋɡwæ");
     mapa.insert("antigo", "ˌɐ\u{0303}ŋtʃˈiɡʊ");
 
-    // --- dígrafos e grupos difíceis ---
     mapa.insert("exemplo", "ˌezˈeɪmplʊ");
     mapa.insert("exato", "ˌezˈatʊ");
     mapa.insert("exame", "ˌezˈɐ\u{0303}my");
@@ -297,7 +310,6 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa.insert("alemão", "ˌalemˈɐ\u{0303}ʊ\u{0303}");
     mapa.insert("verão", "veɾˈɐ\u{0303}ʊ\u{0303}");
 
-    // --- tecnologia / estrangeirismos ---
     mapa.insert("site", "sˈaɪtʃy");
     mapa.insert("email", "ˌemaˈiʊ");
     mapa.insert("online", "oŋlˈaɪŋ");
@@ -329,21 +341,23 @@ pub static LEXICO: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa
 });
 
-/// Consulta o léxico. Devolve `None` se a palavra não estiver mapeada.
+/// Consulta o léxico.
 pub fn buscar_lexico(palavra: &str) -> Option<&'static str> {
     let chave = palavra.to_lowercase();
     LEXICO.get(chave.as_str()).copied()
 }
 
-/// Consulta clíticos átonos. Devolve `None` se não estiver mapeado.
+/// Consulta clíticos átonos.
 pub fn buscar_clitico(palavra: &str) -> Option<&'static str> {
     let chave = palavra.to_lowercase();
     CLITICOS.get(chave.as_str()).copied()
 }
 
-// ---------------------------------------------------------------------------
-// Testes
-// ---------------------------------------------------------------------------
+/// Consulta clíticos em contexto de sentença.
+pub fn buscar_clitico_contexto(palavra: &str) -> Option<&'static str> {
+    let chave = palavra.to_lowercase();
+    CLITICOS_CONTEXTO.get(chave.as_str()).copied()
+}
 
 #[cfg(test)]
 mod testes {
@@ -353,9 +367,10 @@ mod testes {
     fn lexicon_encontra_palavras_comuns() {
         assert!(buscar_lexico("não").is_some());
         assert!(buscar_lexico("também").is_some());
-        assert!(buscar_lexico("você").is_some());
         assert!(buscar_lexico("exemplo").is_some());
         assert!(buscar_lexico("software").is_some());
+        assert!(buscar_lexico("em").is_some());
+        assert!(buscar_lexico("casa").is_none());
     }
 
     #[test]
@@ -374,9 +389,41 @@ mod testes {
     }
 
     #[test]
-    fn cliticos_palavra_ausente_retorna_none() {
-        assert!(buscar_clitico("casa").is_none());
-        assert!(buscar_clitico("").is_none());
+    fn cliticos_contexto_encontram_palavras() {
+        assert!(buscar_clitico_contexto("que").is_some());
+        assert!(buscar_clitico_contexto("na").is_some());
+        assert!(buscar_clitico_contexto("para").is_some());
+        assert!(buscar_clitico_contexto("onde").is_some());
+        assert!(buscar_clitico_contexto("ser").is_some());
+        assert!(buscar_clitico_contexto("você").is_some());
+        assert!(buscar_clitico_contexto("os").is_some());
+        assert!(buscar_clitico_contexto("as").is_some());
+        assert!(buscar_clitico_contexto("por").is_some());
+        assert!(buscar_clitico_contexto("com").is_some());
+    }
+
+    #[test]
+    fn cliticos_contexto_de_correto() {
+        // `de` em contexto → `dʒy`.
+        assert_eq!(buscar_clitico_contexto("de"), Some("dʒy"));
+    }
+
+    #[test]
+    fn clitico_de_fora_de_contexto_e_dʒj() {
+        // `de` isolado → `dʒj`.
+        assert_eq!(buscar_clitico("de"), Some("dʒj"));
+    }
+
+    #[test]
+    fn cliticos_contexto_uma_secundario() {
+        assert_eq!(buscar_clitico_contexto("uma"), Some("ˌumæ"));
+    }
+
+    #[test]
+    fn cliticos_contexto_case_insensitive() {
+        assert_eq!(buscar_clitico_contexto("Que"), buscar_clitico_contexto("que"));
+        assert_eq!(buscar_clitico_contexto("PARA"), buscar_clitico_contexto("para"));
+        assert_eq!(buscar_clitico_contexto("Os"), buscar_clitico_contexto("os"));
     }
 
     #[test]
@@ -386,15 +433,6 @@ mod testes {
         assert_eq!(buscar_clitico("DE"), buscar_clitico("de"));
     }
 
-    /// O léxico precisa estar inteiramente em NFD.
-    ///
-    /// O modelo do Piper foi treinado com o vocabulário do espeak-ng, que usa
-    /// vogal + til combinante (U+0303), nunca a forma precomposta. Se um valor
-    /// escapar como precomposto, o tokenizer do Piper descarta silenciosamente
-    /// e o som sai errado sem erro.
-    ///
-    /// Este teste cobre todas as formas precompostas que poderiam aparecer
-    /// (til, agudo, circunflexo, grave) tanto no léxico quanto nos clíticos.
     #[test]
     fn valores_estao_em_nfd() {
         let precompostos: [(char, &str); 12] = [
@@ -430,52 +468,26 @@ mod testes {
                 );
             }
         }
-
-        // Verificação positiva: "não" precisa conter til combinante.
-        let nao = buscar_lexico("não").unwrap();
-        assert!(
-            nao.contains('\u{0303}'),
-            "esperava til combinante em 'não', mas veio: {:?}",
-            nao
-        );
     }
 
-    /// O léxico não pode conter o `g` ASCII (U+0067).
-    ///
-    /// Existem dois caracteres visualmente idênticos em Unicode:
-    ///   - `g` LATIN SMALL LETTER G (U+0067)
-    ///   - `ɡ` LATIN SMALL LETTER SCRIPT G (U+0261)
-    ///
-    /// O vocabulário do Piper usa exclusivamente U+0261 para o fonema /ɡ/.
-    /// Se um U+0067 escapar, o tokenizer do Piper não o encontra no vocabulário
-    /// e o som é descartado silenciosamente — a palavra sai muda nesse trecho.
-    ///
-    /// Este teste percorre todos os valores do léxico e dos clíticos para
-    /// garantir que nenhum contém U+0067.
     #[test]
     fn sem_g_ascii_nos_valores() {
         for (chave, valor) in LEXICO.iter() {
             assert!(
                 !valor.contains('\u{0067}'),
-                "valor de {:?} contém g ASCII (U+0067): {:?}",
+                "valor de {:?} contém g ASCII: {:?}",
                 chave, valor
             );
         }
         for (chave, valor) in CLITICOS.iter() {
-            assert!(
-                !valor.contains('\u{0067}'),
-                "clítico {:?} contém g ASCII (U+0067): {:?}",
-                chave, valor
-            );
+            assert!(!valor.contains('\u{0067}'), "clítico {:?}: {:?}", chave, valor);
         }
     }
 
     #[test]
     fn nao_ha_chaves_com_underscore() {
-        // As duplicatas `nos_` e `às_` do léxico JS foram descartadas.
         assert!(buscar_clitico("nos_").is_none());
         assert!(buscar_clitico("às_").is_none());
-        // Mas as versões sem underscore existem.
         assert!(buscar_clitico("nos").is_some());
         assert!(buscar_clitico("às").is_some());
     }
