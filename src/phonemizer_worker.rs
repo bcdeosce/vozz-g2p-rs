@@ -23,11 +23,19 @@
 //! 1. Para cada palavra, `precisa_normalizar` → `normalizar` (se preciso).
 //! 2. `fonemizar(palavra, { lexico })`.
 //! 3. Devolve um mapa `{ palavra: ipa }` e o tempo interno em ms.
+//!
+//! Léxico automático:
+//!
+//! Na inicialização, o worker procura um arquivo `lexico_espeak.json` em
+//! caminhos comuns (variável `VOZZ_LEXICON`, pasta do executável, diretório
+//! atual, `data/`, `cache/`). Se encontrar, carrega como léxico base.
+//! O `set_lexicon` continua funcionando e substitui o base.
 
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -38,13 +46,7 @@ use vozz_g2p_rs::splitter::dividir_em_sentencas;
 const SLOW_THRESHOLD_MS: u128 = 50;
 
 /// Identificador de build. Muda a cada alteração do protocolo.
-///
-/// Para conferir qual versão do worker está rodando:
-///
-/// ```bash
-/// echo '{"action":"version"}' | ./target/release/phonemizer-worker
-/// ```
-const BUILD_ID: &str = "2024-11-batch-v2";
+const BUILD_ID: &str = "2024-11-batch-v3";
 
 // ---------------------------------------------------------------------------
 // Estado global
@@ -160,6 +162,53 @@ fn get_lexicon_for(
         merged.insert(k.clone(), v.clone());
     }
     Arc::new(merged)
+}
+
+/// Caminhos padrão onde procurar o léxico automático.
+/// O worker tenta em ordem até encontrar um arquivo válido.
+fn caminhos_lexico_padrao() -> Vec<PathBuf> {
+    let mut caminhos = Vec::new();
+
+    // 1. Variável de ambiente tem prioridade.
+    if let Ok(caminho) = std::env::var("VOZZ_LEXICON") {
+        if !caminho.is_empty() {
+            caminhos.push(PathBuf::from(caminho));
+        }
+    }
+
+    // 2. Mesma pasta do executável.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            caminhos.push(dir.join("lexico_espeak.json"));
+        }
+    }
+
+    // 3. Diretório de trabalho atual (e subpastas comuns).
+    caminhos.push(PathBuf::from("lexico_espeak.json"));
+    caminhos.push(PathBuf::from("data/lexico_espeak.json"));
+    caminhos.push(PathBuf::from("cache/lexico_espeak.json"));
+
+    caminhos
+}
+
+/// Tenta carregar o léxico automático. Devolve o caminho carregado
+/// e o mapa, ou `None` se nenhum arquivo for encontrado.
+fn carregar_lexico_padrao() -> Option<(PathBuf, HashMap<String, String>)> {
+    for caminho in caminhos_lexico_padrao() {
+        if !caminho.is_file() {
+            continue;
+        }
+        match std::fs::read_to_string(&caminho) {
+            Ok(conteudo) => match serde_json::from_str::<HashMap<String, String>>(&conteudo) {
+                Ok(mapa) if !mapa.is_empty() => {
+                    return Some((caminho, mapa));
+                }
+                _ => continue,
+            },
+            Err(_) => continue,
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -307,18 +356,12 @@ fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
 /// `normalizar` não faria nenhuma substituição, então o resultado
 /// é idêntico e o custo cai de ~15µs para ~1-2µs por palavra.
 fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
-    // -----------------------------------------------------------------------
-    // 1. Extrai a voz da requisição (vazio = voz padrão).
-    // -----------------------------------------------------------------------
     let voz = requisicao
         .get("voice")
         .and_then(|valor| valor.as_str())
         .unwrap_or("")
         .to_string();
 
-    // -----------------------------------------------------------------------
-    // 2. Extrai os overrides de léxico, se houver.
-    // -----------------------------------------------------------------------
     let overrides: HashMap<String, String> = requisicao
         .get("overrides")
         .and_then(|valor| valor.as_object())
@@ -332,14 +375,8 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
         })
         .unwrap_or_default();
 
-    // -----------------------------------------------------------------------
-    // 3. Resolve o léxico final (cache + overrides) para a voz pedida.
-    // -----------------------------------------------------------------------
     let lexico = get_lexicon_for(estado, &voz, &overrides);
 
-    // -----------------------------------------------------------------------
-    // 4. Extrai a lista de palavras da requisição.
-    // -----------------------------------------------------------------------
     let palavras: Vec<String> = requisicao
         .get("words")
         .and_then(|valor| valor.as_array())
@@ -354,24 +391,15 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
     let total = palavras.len();
     let mut fonemas: HashMap<String, String> = HashMap::with_capacity(total);
 
-    // -----------------------------------------------------------------------
-    // 5. Loop principal: normaliza (se necessário) e fonemiza cada palavra.
-    // -----------------------------------------------------------------------
     let inicio_loop = Instant::now();
 
     for palavra in &palavras {
-        // Decide se o normalizador precisa rodar para esta palavra.
-        // Palavras puramente alfabéticas que não são abreviações conhecidas
-        // passam direto, porque o normalizador não faria nenhuma substituição.
         let entrada = if precisa_normalizar(palavra) {
             normalizar(palavra, OpcoesNormalizar::default())
         } else {
             palavra.clone()
         };
 
-        // O texto já foi normalizado acima (ou é alfabético puro), então
-        // desligamos a normalização interna do fonemizador para evitar
-        // rodar os regex duas vezes.
         let opcoes = OpcoesFonemizar {
             normalizar: false,
             lexico: Some(lexico.as_ref()),
@@ -379,16 +407,11 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
 
         let fonema = fonemizar(&entrada, &opcoes);
 
-        // Guarda o resultado usando a palavra original como chave,
-        // para o chamador poder correlacionar entrada e saída.
         fonemas.insert(palavra.clone(), fonema);
     }
 
     let tempo_decorrido_ms = inicio_loop.elapsed().as_millis();
 
-    // -----------------------------------------------------------------------
-    // 6. Log de tempo em stderr (não polui o stdout com o JSON de resposta).
-    // -----------------------------------------------------------------------
     eprintln!(
         "[batch] {} palavras | loop={}ms | {:.1}us/palavra",
         total,
@@ -400,9 +423,6 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
         }
     );
 
-    // -----------------------------------------------------------------------
-    // 7. Devolve a resposta estruturada.
-    // -----------------------------------------------------------------------
     RespostaBatch {
         phonemes: fonemas,
         timing_ms: tempo_decorrido_ms,
@@ -416,6 +436,19 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
 
 fn main() {
     let mut estado = Estado::novo();
+
+    // Carrega léxico automático, se houver.
+    if let Some((caminho, lexico)) = carregar_lexico_padrao() {
+        eprintln!(
+            "[lexicon] auto-carregado: {} ({} entradas)",
+            caminho.display(),
+            lexico.len()
+        );
+        estado.lexicon_base = Arc::new(lexico);
+        rebuild_cache(&mut estado);
+    } else {
+        eprintln!("[lexicon] nenhum léxico automático encontrado");
+    }
 
     let stdin = io::stdin();
     let stdout = io::stdout();
