@@ -1,4 +1,3 @@
-```markdown
 # vozz-g2p-rs
 
 Conversor **grafema→fonema (G2P) para português do Brasil**, escrito em Rust puro, com foco em fidelidade à convenção IPA do `espeak-ng pt-br` — a mesma convenção com que modelos neurais de TTS (Piper, Coqui, VITS) são treinados.
@@ -666,9 +665,9 @@ Para bug reports, inclua:
 - IPA produzido
 - IPA esperado (do `espeak-ng -v pt-br --ipa=3 -q "palavra"`)
 - Contexto (se for influenciado por palavras vizinhas)
-```
 
-```markdown
+---
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -870,4 +869,3 @@ Para bug reports, inclua:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-```
