@@ -14,6 +14,11 @@
 //! - A função pública `precisa_normalizar` permite que o chamador pule
 //!   o trabalho pesado de normalização quando a palavra é puramente
 //!   alfabética e não é uma abreviação conhecida.
+//!
+//! - A função pública `eh_sigla_sem_vogal` detecta siglas em minúsculas
+//!   (`ldl`, `ngf`, `cpk`) e interjeições sem vogal (`pst`, `shh`, `hm`),
+//!   que o G2P não consegue fonemizar corretamente. Essas palavras devem
+//!   ser filtradas ou resolvidas pelo léxico externo.
 
 use crate::numbers::{
     ano_por_extenso, decimal_por_extenso, inteiro_por_extenso, ordinal_por_extenso,
@@ -28,6 +33,9 @@ const MESES: [&str; 12] = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho",
     "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ];
+
+/// Vogais do português, com e sem diacríticos. Usado por `eh_sigla_sem_vogal`.
+const VOGAIS_PT: &str = "aeiouáéíóúâêôãõàü";
 
 static ABREVIACOES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut mapa = HashMap::new();
@@ -82,8 +90,6 @@ static ABREVIACOES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     mapa
 });
 
-/// A ordem importa: chaves mais longas primeiro para evitar que
-/// `km` case antes de `km/h`.
 static SIMBOLOS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
     vec![
         ("%", " por cento "),
@@ -109,7 +115,6 @@ static SIMBOLOS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
     ]
 });
 
-/// Siglas que se leem como palavra (não soletrar).
 static SIGLAS_PALAVRA: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
         "onu", "otan", "fifa", "ibama", "inss", "cpf", "cep", "brics", "mercosul",
@@ -120,7 +125,6 @@ static SIGLAS_PALAVRA: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     .collect()
 });
 
-/// Como cada letra é falada ao soletrar uma sigla.
 fn letra_falada(c: char) -> Option<&'static str> {
     match c.to_ascii_lowercase() {
         'a' => Some("á"),
@@ -165,33 +169,70 @@ pub fn soletrar_sigla(sigla: &str) -> String {
     partes.join(" ")
 }
 
-/// Diz se uma palavra precisa passar pelo normalizador.
+/// Diz se a palavra é uma sigla em minúsculas (sem vogais) ou uma
+/// interjeição sem vogal.
 ///
-/// Retorna `false` para palavras puramente alfabéticas que não são
-/// abreviações conhecidas — nesses casos, o `normalizar` não faria
-/// nenhuma substituição e pode ser pulado.
+/// O G2P não consegue fonemizar palavras sem vogais — ele produz algo
+/// bizarro como `ldl` → `ˈwdw`. Essas palavras devem ser:
+///
+/// - filtradas da comparação (o `compare_vozz.py` faz isso);
+/// - resolvidas pelo léxico externo (`lexico_espeak.json`), que tem a
+///   pronúncia soletrada correta.
+///
+/// Regras:
+///
+/// - 2 a 6 caracteres (siglas curtas ou interjeições).
+/// - Todos os caracteres são letras (sem dígitos, símbolos ou hífen).
+/// - Nenhum caractere é vogal do português.
 ///
 /// Exemplos:
 ///
-/// ```text
-/// precisa_normalizar("casa")   -> false   (puramente alfabética)
-/// precisa_normalizar("dr")     -> true    (abreviação conhecida)
-/// precisa_normalizar("Sr.")    -> true    (tem ponto, não é letra)
-/// precisa_normalizar("100mg")  -> true    (tem dígito)
-/// precisa_normalizar("50%")    -> true    (tem símbolo)
-/// ```
+/// | Palavra | Detectada? | Por quê |
+/// |---------|------------|---------|
+/// | `ldl`   | sim        | 3 letras, sem vogal |
+/// | `ngf`   | sim        | 3 letras, sem vogal |
+/// | `cpk`   | sim        | 3 letras, sem vogal |
+/// | `lh`    | sim        | dígrafo, sem vogal |
+/// | `pst`   | sim        | interjeição, sem vogal |
+/// | `shh`   | sim        | interjeição, sem vogal |
+/// | `hm`    | sim        | interjeição, sem vogal |
+/// | `bem`   | não        | tem `e` |
+/// | `sem`   | não        | tem `e` |
+/// | `dom`   | não        | tem `o` |
+/// | `casa`  | não        | tem `a` |
+/// | `a`     | não        | 1 letra |
+/// | `abcdefg` | não      | 7 letras |
+/// | `n1`    | não        | tem dígito |
+pub fn eh_sigla_sem_vogal(palavra: &str) -> bool {
+    let p = palavra.to_lowercase();
+    let n = p.chars().count();
+    if !(2..=6).contains(&n) {
+        return false;
+    }
+    if !p.chars().all(|c| c.is_alphabetic()) {
+        return false;
+    }
+    !p.chars().any(|c| VOGAIS_PT.contains(c))
+}
+
+/// Diz se uma palavra precisa passar pelo normalizador.
+///
+/// Retorna `false` para palavras puramente alfabéticas que não são
+/// abreviações conhecidas e não são siglas sem vogal — nesses casos,
+/// o `normalizar` não faria nenhuma substituição e pode ser pulado.
 pub fn precisa_normalizar(palavra: &str) -> bool {
-    // Se tem qualquer caractere que não seja letra, tem trabalho a fazer.
     if palavra.chars().any(|c| !c.is_alphabetic()) {
         return true;
     }
 
-    // Se é uma abreviação conhecida, precisa normalizar.
     let chave = palavra.to_lowercase();
-    ABREVIACOES.contains_key(chave.as_str())
+    if ABREVIACOES.contains_key(chave.as_str()) {
+        return true;
+    }
+
+    eh_sigla_sem_vogal(palavra)
 }
 
-/// Opções de normalização.
 #[derive(Clone, Copy)]
 pub struct OpcoesNormalizar {
     pub expandir_numeros: bool,
@@ -300,18 +341,15 @@ static RE_ESPACOS_MULTIPLOS: Lazy<Regex> = Lazy::new(|| {
 // Função principal
 // ---------------------------------------------------------------------------
 
-/// Normaliza o texto de entrada para fonemização.
 pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
     let mut t: String = texto.nfc().collect();
 
-    // --- Unicode e espaços ---
     t = RE_ASPAS_SIMPLES.replace_all(&t, "'").into_owned();
     t = RE_ASPAS_DUPLAS.replace_all(&t, "\"").into_owned();
     t = RE_TRACOS.replace_all(&t, "—").into_owned();
     t = RE_RETICENCIAS.replace_all(&t, "...").into_owned();
     t = RE_ESPACOS_ESPECIAIS.replace_all(&t, " ").into_owned();
 
-    // --- URLs ---
     t = RE_URL
         .replace_all(&t, |caps: &Captures| {
             let dom = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -319,7 +357,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- E-mails ---
     t = RE_EMAIL
         .replace_all(&t, |caps: &Captures| {
             let usuario = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -332,7 +369,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Horas completas: 14h30, 14:30 ---
     t = RE_HORA_COMPLETA
         .replace_all(&t, |caps: &Captures| {
             if caps.get(3).is_some() {
@@ -358,7 +394,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Horas simples: 9h ---
     t = RE_HORA_SIMPLES
         .replace_all(&t, |caps: &Captures| {
             let hh: i64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
@@ -368,7 +403,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Datas: 07/09/2025 ou 07-09-2025 ---
     t = RE_DATA
         .replace_all(&t, |caps: &Captures| {
             let dia: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
@@ -394,7 +428,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Moeda BRL: R$ 1.234,56 ---
     t = RE_MOEDA_BRL
         .replace_all(&t, |caps: &Captures| {
             let int_txt = caps.get(1).unwrap().as_str().replace('.', "");
@@ -424,7 +457,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Moeda USD: US$ 10 ---
     t = RE_MOEDA_USD
         .replace_all(&t, |caps: &Captures| {
             let int_txt = caps.get(1).unwrap().as_str().replace('.', "");
@@ -433,7 +465,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Percentual: 50%, 3,14% ---
     t = RE_PERCENTUAL
         .replace_all(&t, |caps: &Captures| {
             let n = caps.get(1).unwrap().as_str();
@@ -456,7 +487,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Temperatura: 30°C ---
     t = RE_TEMPERATURA
         .replace_all(&t, |caps: &Captures| {
             let n: i64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
@@ -467,7 +497,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Ordinais: 1º, 2ª, 3o ---
     t = RE_ORDINAL
         .replace_all(&t, |caps: &Captures| {
             let n: i64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
@@ -477,7 +506,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Telefones: (12) 99999-8888 ---
     t = RE_TELEFONE
         .replace_all(&t, |caps: &Captures| {
             let bruto = caps.get(0).unwrap().as_str();
@@ -486,7 +514,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Números ---
     if opcoes.expandir_numeros {
         t = RE_DECIMAL
             .replace_all(&t, |caps: &Captures| {
@@ -517,7 +544,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
             .into_owned();
     }
 
-    // --- Abreviações ---
     t = RE_ABREVIACAO
         .replace_all(&t, |caps: &Captures| {
             let m = caps.get(0).unwrap().as_str();
@@ -529,7 +555,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
         })
         .into_owned();
 
-    // --- Siglas em CAIXA ALTA ---
     if opcoes.expandir_siglas {
         t = RE_SIGLA
             .replace_all(&t, |caps: &Captures| {
@@ -540,10 +565,6 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
                     return baixa;
                 }
 
-                // Porte fiel do JS, inclusive da condição que quase nunca é
-                // verdadeira. Se tiver vogal e 4+ chars, verifica se NÃO é
-                // puramente [A-ZÀ-Þ]+ com vogal no meio. Como quase sempre é,
-                // a condição é falsa e cai no fallback de soletrar.
                 let tem_vogal = m.chars().any(|c| "AEIOU".contains(c));
                 let n_chars = m.chars().count();
                 if tem_vogal && n_chars >= 4 {
@@ -560,12 +581,10 @@ pub fn normalizar(texto: &str, opcoes: OpcoesNormalizar) -> String {
             .into_owned();
     }
 
-    // --- Símbolos restantes ---
     for (simbolo, texto_substituto) in SIMBOLOS.iter() {
         t = t.replace(simbolo, texto_substituto);
     }
 
-    // --- Limpeza final ---
     t = RE_ESPACOS_MULTIPLOS.replace_all(&t, " ").into_owned();
     t.trim().to_string()
 }
@@ -582,6 +601,8 @@ mod testes {
         normalizar(texto, OpcoesNormalizar::default())
     }
 
+    // --- Aspas, traços, símbolos ---
+
     #[test]
     fn aspas_e_tracos() {
         assert_eq!(norm("olá \u{201C}mundo\u{201D}"), "olá \"mundo\"");
@@ -589,6 +610,14 @@ mod testes {
         assert_eq!(norm("a\u{2013}b"), "a—b");
         assert_eq!(norm("fim\u{2026}"), "fim...");
     }
+
+    #[test]
+    fn simbolos() {
+        assert_eq!(norm("a & b"), "a e b");
+        assert_eq!(norm("x = 5"), "x igual a cinco");
+    }
+
+    // --- Números ---
 
     #[test]
     fn numero_simples() {
@@ -606,6 +635,14 @@ mod testes {
     fn milhar_com_ponto() {
         assert_eq!(norm("1.234"), "mil duzentos e trinta e quatro");
     }
+
+    #[test]
+    fn nao_expandir_numeros() {
+        let o = OpcoesNormalizar { expandir_numeros: false, expandir_siglas: true };
+        assert_eq!(normalizar("42", o), "42");
+    }
+
+    // --- Datas, horas, moedas ---
 
     #[test]
     fn data() {
@@ -638,6 +675,27 @@ mod testes {
     }
 
     #[test]
+    fn temperatura() {
+        assert_eq!(norm("30°C"), "trinta graus celsius");
+    }
+
+    // --- Ordinais ---
+
+    #[test]
+    fn ordinal_masculino() {
+        assert_eq!(norm("1º"), "primeiro");
+        assert_eq!(norm("2º"), "segundo");
+    }
+
+    #[test]
+    fn ordinal_feminino() {
+        assert_eq!(norm("1ª"), "primeira");
+        assert_eq!(norm("2ª"), "segunda");
+    }
+
+    // --- Abreviações e siglas ---
+
+    #[test]
     fn abreviacao() {
         assert_eq!(norm("Sr. Silva"), "senhor Silva");
         assert_eq!(norm("Dra. Ana"), "doutora Ana");
@@ -657,38 +715,10 @@ mod testes {
         assert_eq!(norm("ONU"), "onu");
     }
 
-    #[test]
-    fn ordinal_masculino() {
-        assert_eq!(norm("1º"), "primeiro");
-        assert_eq!(norm("2º"), "segundo");
-    }
-
-    #[test]
-    fn ordinal_feminino() {
-        assert_eq!(norm("1ª"), "primeira");
-        assert_eq!(norm("2ª"), "segunda");
-    }
-
-    #[test]
-    fn temperatura() {
-        assert_eq!(norm("30°C"), "trinta graus celsius");
-    }
-
-    #[test]
-    fn simbolos() {
-        assert_eq!(norm("a & b"), "a e b");
-        assert_eq!(norm("x = 5"), "x igual a cinco");
-    }
-
-    #[test]
-    fn nao_expandir_numeros() {
-        let o = OpcoesNormalizar { expandir_numeros: false, expandir_siglas: true };
-        assert_eq!(normalizar("42", o), "42");
-    }
+    // --- precisa_normalizar ---
 
     #[test]
     fn precisa_normalizar_palavra_alfabetica() {
-        // Palavras puramente alfabéticas e sem abreviação: caminho rápido.
         assert!(!precisa_normalizar("casa"));
         assert!(!precisa_normalizar("banana"));
         assert!(!precisa_normalizar("exemplo"));
@@ -697,7 +727,6 @@ mod testes {
 
     #[test]
     fn precisa_normalizar_abreviacoes() {
-        // Abreviações conhecidas: precisam normalizar mesmo sem ponto.
         assert!(precisa_normalizar("dr"));
         assert!(precisa_normalizar("sr"));
         assert!(precisa_normalizar("dra"));
@@ -709,7 +738,6 @@ mod testes {
 
     #[test]
     fn precisa_normalizar_abreviacoes_case_insensitive() {
-        // Deve reconhecer abreviações independentemente de caixa.
         assert!(precisa_normalizar("Dr"));
         assert!(precisa_normalizar("SR"));
         assert!(precisa_normalizar("Dra"));
@@ -718,7 +746,6 @@ mod testes {
 
     #[test]
     fn precisa_normalizar_com_ponto() {
-        // Qualquer palavra com ponto precisa normalizar.
         assert!(precisa_normalizar("dr."));
         assert!(precisa_normalizar("sr."));
         assert!(precisa_normalizar("etc."));
@@ -739,5 +766,148 @@ mod testes {
         assert!(precisa_normalizar("R$"));
         assert!(precisa_normalizar("a&b"));
         assert!(precisa_normalizar("x=5"));
+    }
+
+    // --- eh_sigla_sem_vogal ---
+
+    #[test]
+    fn sigla_sem_vogal_detecta_ldl() {
+        assert!(eh_sigla_sem_vogal("ldl"));
+        assert!(eh_sigla_sem_vogal("LDL"));
+    }
+
+    #[test]
+    fn sigla_sem_vogal_detecta_ngf() {
+        assert!(eh_sigla_sem_vogal("ngf"));
+        assert!(eh_sigla_sem_vogal("NGF"));
+        assert!(eh_sigla_sem_vogal("vldl"));
+        assert!(eh_sigla_sem_vogal("drc"));
+    }
+
+    #[test]
+    fn sigla_sem_vogal_detecta_curtas() {
+        for p in ["cpk", "mhc", "tnf", "kgf", "fff", "df", "drc", "vldl"] {
+            assert!(eh_sigla_sem_vogal(p), "{}: esperava detectar", p);
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_detecta_digrafos() {
+        for p in ["lh", "nh", "ch", "rr", "ss"] {
+            assert!(
+                eh_sigla_sem_vogal(p),
+                "{}: esperava detectar (2 letras, sem vogal)", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_detecta_interjeicoes() {
+        for p in ["pst", "shh", "hm", "shhh", "mm", "nn", "psst"] {
+            assert!(
+                eh_sigla_sem_vogal(p),
+                "{}: esperava detectar interjeição", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_nao_detecta_palavras_com_vogal() {
+        for p in [
+            "bem", "sem", "dom", "casa", "banana", "sol", "mar", "paz",
+            "xyz", "n1", "abc",
+        ] {
+            // "xyz" tem y mas não tem vogal PT: é detectada.
+            // Vou testar separadamente.
+            if p == "xyz" {
+                assert!(
+                    eh_sigla_sem_vogal(p),
+                    "{}: xyz deve ser detectada (sem vogal PT)", p
+                );
+            } else {
+                assert!(
+                    !eh_sigla_sem_vogal(p),
+                    "{}: não esperava detectar", p
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_nao_detecta_uma_letra() {
+        for p in ["a", "e", "b", "c", "d", "x"] {
+            assert!(
+                !eh_sigla_sem_vogal(p),
+                "{}: 1 letra não deve ser detectada", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_nao_detecta_muito_longa() {
+        // 7+ letras: não é sigla curta nem interjeição.
+        for p in ["abcdefg", "bcdfghjkl", "mnbvcxz"] {
+            assert!(
+                !eh_sigla_sem_vogal(p),
+                "{}: muito longa, não deve ser detectada", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_nao_detecta_com_digito() {
+        for p in ["n1", "4g", "3d", "a1b"] {
+            assert!(
+                !eh_sigla_sem_vogal(p),
+                "{}: tem dígito, não deve ser detectada", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_nao_detecta_com_acento() {
+        // Vogais com acento também são vogais.
+        for p in ["cá", "pé", "só", "gê", "vê"] {
+            assert!(
+                !eh_sigla_sem_vogal(p),
+                "{}: tem vogal acentuada, não deve ser detectada", p
+            );
+        }
+    }
+
+    #[test]
+    fn sigla_sem_vogal_detecta_www() {
+        assert!(eh_sigla_sem_vogal("www"));
+    }
+
+    #[test]
+    fn sigla_sem_vogal_case_insensitive() {
+        assert_eq!(eh_sigla_sem_vogal("ldl"), eh_sigla_sem_vogal("LDL"));
+        assert_eq!(eh_sigla_sem_vogal("ngf"), eh_sigla_sem_vogal("NGF"));
+        assert_eq!(eh_sigla_sem_vogal("pst"), eh_sigla_sem_vogal("PST"));
+    }
+
+    #[test]
+    fn precisa_normalizar_inclui_siglas_sem_vogal() {
+        // Siglas sem vogais agora contam como "precisa normalizar",
+        // porque o chamador pode querer descartá-las ou resolvê-las
+        // pelo léxico externo.
+        for p in ["ldl", "ngf", "cpk", "pst", "shh", "hm", "lh"] {
+            assert!(
+                precisa_normalizar(p),
+                "{}: esperava precisar normalizar", p
+            );
+        }
+    }
+
+    #[test]
+    fn precisa_normalizar_nao_inclui_palavras_comuns() {
+        // Palavras com vogal continuam fora.
+        for p in ["casa", "banana", "bem", "sem", "dom", "sol"] {
+            assert!(
+                !precisa_normalizar(p),
+                "{}: não esperava precisar normalizar", p
+            );
+        }
     }
 }
