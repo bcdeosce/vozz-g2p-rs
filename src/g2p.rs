@@ -25,30 +25,47 @@
 //! - `-irdes` final → tônica no `i`.
 //! - Prefixo `sobre-` (4+ sílabas) → sem acento secundário inicial.
 //!
-//! Notação:
+//! Notação (aplicada em `limpar`, apenas em valores gerados por regras):
 //!
-//! - `y` final após `tʃ`/`dʒ` → `j`.
+//! - `y` final após `tʃ`/`dʒ`/`ʒ` → `j`.
 //! - `ʊ` final após `ʃ`/`ʒ`/`z` → `w`.
 //!
-//! Clíticos contextuais (ver `lexicon.rs`):
+//! Modos de operação (detecção automática por contagem de palavras):
 //!
-//! - Palavras funcionais em contexto perdem acento primário.
+//! **Isolado (1 palavra):**
 //!
-//! Sândi:
+//! 1. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
+//! 2. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
+//! 3. `palavra_para_ipa` (regras)
+//!
+//! **Contexto (2+ palavras):**
+//!
+//! 0. Homógrafo anotado pelo Bifonia (`lexicon_homografos.json`)
+//! 1. `buscar_clitico_contexto` (`data/lexicon_contexto.json`)
+//! 2. `buscar_lexico_contexto` (`data/lexicon_contexto.json`)
+//! 3. `lexicon_espeak_contexto.json` (via `OpcoesFonemizar::lexico_contexto`)
+//! 4. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
+//! 5. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
+//! 6. `palavra_para_ipa` (regras)
+//!
+//! Sândi (aplicado em ambos os modos):
 //!
 //! - `s` final antes de vogal ou consoante sonora → `z`.
+//! - `z` final antes de consoante surda ou fim de sentença → `s`.
+//! - `r` final antes de vogal → `ɾ` (tepe intervocálico).
+//! - `ɾ` final antes de consoante ou fim → `r` (vibrante em coda).
+//! - `ʊ`/`y` final antes de vogal → `w`/`j` — **apenas** quando o valor
+//!   não veio de um léxico contextual curado.
 //!
-//! Ordem de resolução em `resolver_palavra`:
+//! Homógrafos (`lexicon_homografos.json`):
 //!
-//! 1. Clíticos contextuais (mais específico).
-//! 2. Clíticos átonos gerais.
-//! 3. Léxico interno (correto por construção).
-//! 4. Léxico auto-carregado (JSON do espeak).
-//! 5. Regras.
+//! - O IPA armazenado é a **forma base** (sem sândi de glide, sem
+//!   dessonorização, sem tap). Aplicam-se todos os sândis sobre ele.
+//! - O sentido é anotado pelo Bifonia antes da fonemização.
 
-use crate::lexicon::{
-    buscar_clitico, buscar_clitico_contexto, buscar_lexico,
-};
+use crate::homografos::Homografos;
+use crate::lexicon_contexto::{buscar_clitico_contexto, buscar_lexico_contexto};
+use crate::lexicon_palavra::{buscar_clitico, buscar_lexico};
 use crate::normalize::{normalizar, OpcoesNormalizar};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -72,6 +89,7 @@ const DIGRAFOS: [&str; 5] = ["ch", "lh", "nh", "rr", "ss"];
 const OBSTRUINTES: &str = "pbtdkgfvc";
 const NASALIZAVEIS: [&str; 3] = ["m", "n", "nh"];
 
+/// Consoantes que palatalizam antes de `i`/`e` brando.
 const PALATALIZAVEIS: [&str; 4] = ["c", "g", "d", "t"];
 
 const RADICAIS_KS: &[&str] = &[
@@ -84,6 +102,44 @@ const RADICAIS_KS: &[&str] = &[
 ];
 
 const EXCECOES_KS: [&str; 2] = ["sext", "anexim"];
+
+/// Palavras que devem receber sândi de glide mesmo quando o valor
+/// base veio de léxico contextual curado.
+const GLIDE_FORCAR: &[&str] = &[
+    "de", "se", "me", "tive", "onde", "disso", "adicionado",
+];
+
+/// Palavras que nunca recebem sândi de glide.
+const GLIDE_BLOQUEAR: &[&str] = &["que"];
+
+/// Ajustes específicos que NÃO são glide: acento, timbre, etc.
+/// Roda depois dos sândis de `s/z`, `r/ɾ` e `glide`.
+fn ajuste_especifico(palavra: &str, ipa: String, proxima_inicial: Option<char>) -> String {
+    let proxima_eh_vogal = proxima_inicial
+        .map(|c| c.to_lowercase().next().map_or(false, eh_vogal))
+        .unwrap_or(false);
+
+    match palavra {
+        // Artigo `o`: ʊ → u antes de vogal
+        "o" => {
+            if proxima_eh_vogal && ipa == "ʊ" {
+                return "u".to_string();
+            }
+            ipa
+        }
+        // `pode`: j → y antes de consoante ou fim
+        "pode" => {
+            if !proxima_eh_vogal && ipa.ends_with('j') {
+                let mut r = ipa;
+                r.pop();
+                r.push('y');
+                return r;
+            }
+            ipa
+        }
+        _ => ipa,
+    }
+}
 
 fn tem_radical_ks(palavra: &str) -> bool {
     let normalizada: String = palavra
@@ -908,7 +964,7 @@ fn mapear_coda(consoantes: &[String], contexto: &ContextoCoda) -> String {
     saida
 }
 
-pub fn palavra_para_ipa(palavra: &str, proxima_inicial: Option<char>) -> String {
+pub fn palavra_para_ipa(palavra: &str, _proxima_inicial: Option<char>) -> String {
     let palavra_minuscula = palavra.to_lowercase();
     if palavra_minuscula.is_empty() {
         return String::new();
@@ -922,7 +978,6 @@ pub fn palavra_para_ipa(palavra: &str, proxima_inicial: Option<char>) -> String 
     let posicao_tonica = acentuar(&mut silabas, &palavra_minuscula);
     acento_secundario(&mut silabas, posicao_tonica, &palavra_minuscula);
 
-    // Sândi é aplicado em `resolver_palavra`, não aqui.
     let sonorizar_s = false;
 
     let caracteres: Vec<char> = palavra_minuscula.chars().collect();
@@ -1101,11 +1156,9 @@ fn limpar(ipa: &str) -> String {
     let sem_zs = sem_ss.replace("zs", "s");
     let sem_ideo = RE_IDEO.replace_all(&sem_zs, "idʒjʊ").into_owned();
 
-    // Notação: `y` final após africada palatal → `j` (espeak).
     let sem_palatal_y = RE_PALATAL_Y
         .replace_all(&sem_ideo, "${1}j")
         .into_owned();
-    // Notação: `ʊ` final após fricativa palatal → `w` (espeak).
     let sem_palatal_u = RE_PALATAL_U
         .replace_all(&sem_palatal_y, "${1}w")
         .into_owned();
@@ -1131,9 +1184,16 @@ static RE_ESPACOS_MULTIPLOS: Lazy<Regex> =
 static RE_ESPACO_ANTES_PONTUACAO: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\s+([;:,.!?…])").unwrap());
 
+/// Opções de fonemização.
+///
+/// `lexico` é o JSON principal do espeak (`lexicon_espeak.json`).
+/// `lexico_contexto` é o JSON contextual (`lexicon_espeak_contexto.json`).
+/// `homografos` é o desambiguador + léxico `(palavra, sentido) → IPA`.
 pub struct OpcoesFonemizar<'a> {
     pub normalizar: bool,
     pub lexico: Option<&'a HashMap<String, String>>,
+    pub lexico_contexto: Option<&'a HashMap<String, String>>,
+    pub homografos: Option<&'a Homografos>,
 }
 
 impl<'a> Default for OpcoesFonemizar<'a> {
@@ -1141,10 +1201,136 @@ impl<'a> Default for OpcoesFonemizar<'a> {
         Self {
             normalizar: true,
             lexico: None,
+            lexico_contexto: None,
+            homografos: None,
         }
     }
 }
 
+/// Resolve uma palavra em modo isolado (1 palavra).
+///
+/// **Sem sândi**: não há palavra seguinte para condicionar a forma.
+fn resolver_palavra_isolada(
+    palavra: &str,
+    _proxima_inicial: Option<char>,
+    lexico: Option<&HashMap<String, String>>,
+) -> String {
+    if let Some(lexico_form) = buscar_lexico(palavra) {
+        return lexico_form.to_string();
+    }
+    if let Some(clitico_form) = buscar_clitico(palavra) {
+        return clitico_form.to_string();
+    }
+    if let Some(mapa) = lexico {
+        if let Some(ipa) = mapa.get(palavra) {
+            return ipa.clone();
+        }
+    }
+    palavra_para_ipa(palavra, None)
+}
+
+/// Resolve uma palavra em modo contexto (2+ palavras).
+///
+/// Ordem de consulta:
+/// 0. Homógrafo anotado pelo Bifonia (`lexicon_homografos.json`).
+/// 1. `buscar_clitico_contexto` — clíticos contextuais curados.
+/// 2. `buscar_lexico_contexto` — léxico contextual curado.
+/// 3. `lexico_contexto` externo — espeak em contexto.
+/// 4. `lexico` externo — espeak isolado.
+/// 5. `buscar_lexico` — léxico de palavra curado.
+/// 6. `buscar_clitico` — clíticos curados.
+/// 7. `palavra_para_ipa` — regras.
+///
+/// Sândi aplicado ao final:
+///
+/// - **Sempre**: `s`/`z` final e `r`/`ɾ` final por contexto fonológico.
+/// - **Só quando o valor NÃO veio de léxico contextual curado**:
+///   `ʊ`/`y` final antes de vogal → `w`/`j`.
+/// - **Homógrafos** recebem todos os sândis — o IPA armazenado é a
+///   forma base.
+fn resolver_palavra_contexto(
+    palavra: &str,
+    proxima_inicial: Option<char>,
+    lexico: Option<&HashMap<String, String>>,
+    lexico_contexto: Option<&HashMap<String, String>>,
+    homografos: Option<&Homografos>,
+    sentido: Option<&str>,
+) -> String {
+    // 0. Homógrafo anotado — prioridade máxima.
+    //    O IPA é a forma base; aplicar todos os sândis.
+    if let (Some(hom), Some(s)) = (homografos, sentido) {
+        if let Some(ipa) = hom.ipa_para(palavra, s) {
+            let ipa_s = aplicar_sandi_s_final(ipa.to_string(), proxima_inicial);
+            let ipa_r = aplicar_sandi_rotico(ipa_s, proxima_inicial);
+            return aplicar_sandi_glide(ipa_r, proxima_inicial);
+        }
+    }
+
+    // 1..7 — cadeia normal
+    let (ipa_base, veio_do_contexto) =
+        if let Some(forma) = buscar_clitico_contexto(palavra) {
+            (forma.to_string(), true)
+        } else if let Some(forma) = buscar_lexico_contexto(palavra) {
+            (forma.to_string(), true)
+        } else if let Some(mapa) = lexico_contexto {
+            if let Some(ipa) = mapa.get(palavra) {
+                (ipa.clone(), true)
+            } else if let Some(mapa2) = lexico {
+                if let Some(ipa2) = mapa2.get(palavra) {
+                    (ipa2.clone(), false)
+                } else if let Some(l) = buscar_lexico(palavra) {
+                    (l.to_string(), true)
+                } else if let Some(c) = buscar_clitico(palavra) {
+                    (c.to_string(), true)
+                } else {
+                    (palavra_para_ipa(palavra, proxima_inicial), false)
+                }
+            } else if let Some(l) = buscar_lexico(palavra) {
+                (l.to_string(), true)
+            } else if let Some(c) = buscar_clitico(palavra) {
+                (c.to_string(), true)
+            } else {
+                (palavra_para_ipa(palavra, proxima_inicial), false)
+            }
+        } else if let Some(mapa) = lexico {
+            if let Some(ipa) = mapa.get(palavra) {
+                (ipa.clone(), false)
+            } else if let Some(l) = buscar_lexico(palavra) {
+                (l.to_string(), true)
+            } else if let Some(c) = buscar_clitico(palavra) {
+                (c.to_string(), true)
+            } else {
+                (palavra_para_ipa(palavra, proxima_inicial), false)
+            }
+        } else if let Some(l) = buscar_lexico(palavra) {
+            (l.to_string(), true)
+        } else if let Some(c) = buscar_clitico(palavra) {
+            (c.to_string(), true)
+        } else {
+            (palavra_para_ipa(palavra, proxima_inicial), false)
+        };
+
+    let ipa_com_s = aplicar_sandi_s_final(ipa_base, proxima_inicial);
+    let ipa_com_r = aplicar_sandi_rotico(ipa_com_s, proxima_inicial);
+
+    // Glide: decisão por palavra
+    let aplicar_glide = if GLIDE_BLOQUEAR.contains(&palavra) {
+        false
+    } else if GLIDE_FORCAR.contains(&palavra) {
+        true
+    } else {
+        !veio_do_contexto
+    };
+
+    let ipa_com_glide = if aplicar_glide {
+        aplicar_sandi_glide(ipa_com_r, proxima_inicial)
+    } else {
+        ipa_com_r
+    };
+
+    // Ajustes específicos não-glide
+    ajuste_especifico(palavra, ipa_com_glide, proxima_inicial)
+}
 pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     let texto_processado = if opcoes.normalizar {
         normalizar(texto, OpcoesNormalizar::default())
@@ -1159,12 +1345,75 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         .find_iter(&texto_processado)
         .map(|m| m.as_str())
         .collect();
+
+    let n_palavras = tokens
+        .iter()
+        .filter(|t| t.chars().any(char::is_alphabetic) && !RE_PONTUACAO.is_match(t))
+        .count();
+    let modo_isolado = n_palavras <= 1;
+
     let palavras: Vec<&str> = tokens
         .iter()
-        .filter(|x| x.chars().any(char::is_alphabetic))
+        .filter(|x| x.chars().any(char::is_alphabetic) && !RE_PONTUACAO.is_match(x))
         .copied()
         .collect();
 
+    // Pré-calcula, para cada palavra (índice em `palavras`), a inicial
+    // da próxima palavra ATRAVESSÁVEL — só se não houver pontuação
+    // entre as duas. Se houver qualquer pontuação (vírgula, ponto,
+    // ponto-e-vírgula, etc.), a inicial é `None` e o sândi é bloqueado.
+    let proxima_por_palavra: Vec<Option<char>> = {
+        // Mapeia cada palavra ao seu índice nos tokens brutos.
+        let mut posicoes: Vec<usize> = Vec::with_capacity(palavras.len());
+        for (i, t) in tokens.iter().enumerate() {
+            if t.chars().any(char::is_alphabetic) && !RE_PONTUACAO.is_match(t) {
+                posicoes.push(i);
+            }
+        }
+
+        let mut resultado: Vec<Option<char>> = vec![None; palavras.len()];
+        for k in 0..posicoes.len() {
+            let pos_atual = posicoes[k];
+            let Some(&pos_prox) = posicoes.get(k + 1) else {
+                // Última palavra: sem próxima.
+                resultado[k] = None;
+                continue;
+            };
+
+            // Verifica se há pontuação entre pos_atual e pos_prox.
+            let tem_pontuacao = ((pos_atual + 1)..pos_prox)
+                .any(|j| RE_PONTUACAO.is_match(tokens[j]));
+
+            resultado[k] = if tem_pontuacao {
+                None
+            } else {
+                tokens[pos_prox].chars().next()
+            };
+        }
+        resultado
+    };
+
+    // PASSE 1 — anotação de sentido para homógrafos
+    let anotacoes: Vec<Option<String>> = if let (Some(hom), false) =
+        (opcoes.homografos, modo_isolado)
+    {
+        palavras
+            .iter()
+            .map(|p| {
+                let base = p.to_lowercase();
+                if hom.tem_regra(&base) {
+                    hom.desambiguar(&base, &texto_processado)
+                        .map(|d| d.sentido)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        vec![None; palavras.len()]
+    };
+
+    // PASSE 2 — fonemização
     let mut partes: Vec<String> = Vec::new();
     let mut indice_palavra = 0;
 
@@ -1185,10 +1434,11 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
             continue;
         }
 
-        let proxima = palavras
-            .get(indice_palavra + 1)
+        let proxima_inicial = proxima_por_palavra
+            .get(indice_palavra)
             .copied()
-            .unwrap_or("");
+            .flatten();
+        let sentido = anotacoes.get(indice_palavra).and_then(|s| s.as_deref());
         indice_palavra += 1;
 
         let palavra_bruta = token
@@ -1207,18 +1457,37 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
                 .collect();
             let ipa_sub: Vec<String> = subpalavras
                 .iter()
-                .map(|w| resolver_palavra(w, None, opcoes.lexico))
+                .map(|w| {
+                    if modo_isolado {
+                        resolver_palavra_isolada(w, None, opcoes.lexico)
+                    } else {
+                        resolver_palavra_contexto(
+                            w, None, opcoes.lexico, opcoes.lexico_contexto,
+                            opcoes.homografos, None,
+                        )
+                    }
+                })
                 .collect();
             partes.push(ipa_sub.join(" "));
             continue;
         }
 
-        let proxima_inicial = proxima.chars().next();
-        partes.push(resolver_palavra(
-            &palavra_bruta,
-            proxima_inicial,
-            opcoes.lexico,
-        ));
+        if modo_isolado {
+            partes.push(resolver_palavra_isolada(
+                &palavra_bruta,
+                proxima_inicial,
+                opcoes.lexico,
+            ));
+        } else {
+            partes.push(resolver_palavra_contexto(
+                &palavra_bruta,
+                proxima_inicial,
+                opcoes.lexico,
+                opcoes.lexico_contexto,
+                opcoes.homografos,
+                sentido,
+            ));
+        }
     }
 
     let junto = partes.join("");
@@ -1231,60 +1500,109 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     sem_espaco_antes_pontuacao.trim().to_string()
 }
 
-/// Aplica a sonorização do `s` final em contato com a palavra seguinte.
+/// Aplica sândi de `s`/`z` final em contato com a palavra seguinte.
 fn aplicar_sandi_s_final(ipa: String, proxima_inicial: Option<char>) -> String {
+    if ipa.is_empty() {
+        return ipa;
+    }
+
     let Some(inicial_bruta) = proxima_inicial else {
-        return ipa;
-    };
-
-    // O `proxima_inicial` vem do texto original, que pode estar em
-    // caixa alta (`Os`, `As`). Normaliza para minúscula.
-    let inicial = inicial_bruta.to_lowercase().next().unwrap_or(' ');
-
-    if !ipa.ends_with('s') {
-        return ipa;
-    }
-
-    let sonoriza = eh_vogal(inicial) || "bdgjlmnrvz".contains(inicial);
-    if !sonoriza {
-        return ipa;
-    }
-
-    let mut resultado = ipa;
-    resultado.pop();
-    resultado.push('z');
-    resultado
-}
-
-fn resolver_palavra(
-    palavra: &str,
-    proxima_inicial: Option<char>,
-    lexico_extra: Option<&HashMap<String, String>>,
-) -> String {
-    // 1. Clíticos contextuais têm prioridade máxima.
-    let ipa_base = if let Some(forma) = buscar_clitico_contexto(palavra) {
-        forma.to_string()
-    } else if let Some(mapa) = lexico_extra {
-        // 2. Léxico do usuário / auto-carregado.
-        if let Some(ipa) = mapa.get(palavra) {
-            ipa.clone()
-        } else if let Some(lexico) = buscar_lexico(palavra) {
-            lexico.to_string()
-        } else if let Some(clitico) = buscar_clitico(palavra) {
-            clitico.to_string()
-        } else {
-            palavra_para_ipa(palavra, proxima_inicial)
+        if ipa.ends_with('z') {
+            let mut r = ipa;
+            r.pop();
+            r.push('s');
+            return r;
         }
-    } else if let Some(lexico) = buscar_lexico(palavra) {
-        lexico.to_string()
-    } else if let Some(clitico) = buscar_clitico(palavra) {
-        clitico.to_string()
-    } else {
-        palavra_para_ipa(palavra, proxima_inicial)
+        return ipa;
     };
 
-    aplicar_sandi_s_final(ipa_base, proxima_inicial)
+    let inicial = inicial_bruta.to_lowercase().next().unwrap_or(' ');
+    let sonora = eh_vogal(inicial) || "bdgjlmnrvz".contains(inicial);
+
+    if ipa.ends_with('s') && sonora {
+        let mut r = ipa;
+        r.pop();
+        r.push('z');
+        return r;
+    }
+    if ipa.ends_with('z') && !sonora {
+        let mut r = ipa;
+        r.pop();
+        r.push('s');
+        return r;
+    }
+    ipa
 }
+
+/// Aplica sândi rótico (`r`/`ɾ`) em contato com a palavra seguinte.
+fn aplicar_sandi_rotico(ipa: String, proxima_inicial: Option<char>) -> String {
+    if ipa.is_empty() {
+        return ipa;
+    }
+
+    let proxima_eh_vogal = proxima_inicial
+        .map(|c| c.to_lowercase().next().map_or(false, eh_vogal))
+        .unwrap_or(false);
+
+    if proxima_eh_vogal && ipa.ends_with('r') {
+        let mut r = ipa;
+        r.pop();
+        r.push('ɾ');
+        return r;
+    }
+    if !proxima_eh_vogal && ipa.ends_with('ɾ') {
+        let mut r = ipa;
+        r.pop();
+        r.push('r');
+        return r;
+    }
+    ipa
+}
+
+/// Aplica sândi de glide em contato com a palavra seguinte.
+///
+/// Bidirecional:
+///   - antes de vogal: `ʊ → w`, `y → j`
+///   - antes de consoante/fim: `w → ʊ`, `j → y`
+fn aplicar_sandi_glide(ipa: String, proxima_inicial: Option<char>) -> String {
+    if ipa.is_empty() {
+        return ipa;
+    }
+
+    let proxima_eh_vogal = proxima_inicial
+        .map(|c| c.to_lowercase().next().map_or(false, eh_vogal))
+        .unwrap_or(false);
+
+    if proxima_eh_vogal {
+        if ipa.ends_with('ʊ') {
+            let mut r = ipa;
+            r.pop();
+            r.push('w');
+            return r;
+        }
+        if ipa.ends_with('y') {
+            let mut r = ipa;
+            r.pop();
+            r.push('j');
+            return r;
+        }
+    } else {
+        if ipa.ends_with('w') {
+            let mut r = ipa;
+            r.pop();
+            r.push('ʊ');
+            return r;
+        }
+        if ipa.ends_with('j') {
+            let mut r = ipa;
+            r.pop();
+            r.push('y');
+            return r;
+        }
+    }
+    ipa
+}
+
 
 pub fn phonemize(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     fonemizar(texto, opcoes)
@@ -1361,52 +1679,63 @@ mod testes {
         );
     }
 
-    // --- Clíticos contextuais ---
+    // --- Clíticos em modo isolado (1 palavra) ---
 
     #[test]
-    fn clitico_que_sem_acento_em_contexto() {
+    fn clitico_que_tonico_isolado() {
         let r = fonemizar("que", &OpcoesFonemizar::default());
         assert!(
-            r.contains("ky") && !r.contains("kˈy"),
-            "que: esperava 'ky' sem acento, veio {}", r
+            r.contains("kˈy"),
+            "que isolado: esperava 'kˈy', veio {}", r
         );
     }
 
     #[test]
-    fn clitico_na_sem_acento_em_contexto() {
+    fn clitico_na_tonico_isolado() {
         let r = fonemizar("na", &OpcoesFonemizar::default());
         assert!(
-            r.contains("na") && !r.contains("nˈa"),
-            "na: esperava 'na' sem acento, veio {}", r
+            r.contains("nˈa"),
+            "na isolado: esperava 'nˈa', veio {}", r
+        );
+    }
+
+    #[test]
+    #[allow(uncommon_codepoints)]
+    fn clitico_de_tonico_isolado() {
+        let r = fonemizar("de", &OpcoesFonemizar::default());
+        assert!(
+            r.contains("dʒˈy"),
+            "de isolado: esperava 'dʒˈy', veio {}", r
+        );
+    }
+
+    // --- Clíticos em modo contexto (2+ palavras) ---
+
+    #[test]
+    #[allow(uncommon_codepoints)]
+    fn clitico_de_contexto_e_dʒy() {
+        let r = fonemizar("de casa", &OpcoesFonemizar::default());
+        assert!(
+            r.contains("dʒy"),
+            "de em contexto: esperava 'dʒy', veio {}", r
         );
     }
 
     #[test]
     fn clitico_para_secundario_em_contexto() {
-        let r = fonemizar("para", &OpcoesFonemizar::default());
+        let r = fonemizar("para casa", &OpcoesFonemizar::default());
         assert!(
-            r.contains("pˌaɾæ") && !r.contains("pˈaɾæ"),
-            "para: esperava 'pˌaɾæ', veio {}", r
+            r.contains("pˌaɾæ"),
+            "para em contexto: esperava 'pˌaɾæ', veio {}", r
         );
     }
 
     #[test]
     fn clitico_ser_sem_acento_em_contexto() {
-        let r = fonemizar("ser", &OpcoesFonemizar::default());
+        let r = fonemizar("ser algo", &OpcoesFonemizar::default());
         assert!(
             r.contains("seɾ") && !r.contains("sˈer"),
-            "ser: esperava 'seɾ', veio {}", r
-        );
-    }
-
-    #[test]
-    fn clitico_de_vira_dʒy() {
-        // `de` sempre passa por `CLITICOS_CONTEXTO` (não há distinção
-        // isolado/contexto no resolver_palavra).
-        let r = fonemizar("de", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("dʒy"),
-            "de: esperava 'dʒy', veio {}", r
+            "ser em contexto: esperava 'seɾ', veio {}", r
         );
     }
 
@@ -1740,6 +2069,7 @@ mod testes {
     }
 
     #[test]
+    #[allow(uncommon_codepoints)]
     fn ideo_final_vira_idʒjʊ() {
         let r = ipa("radionuclídeo");
         assert!(r.contains("idʒjʊ"), "esperava 'idʒjʊ', veio {}", r);
