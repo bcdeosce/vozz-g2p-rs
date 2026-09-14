@@ -18,6 +18,9 @@ Para cada sentença, fonemiza com três motores e compara em dois níveis:
 As divergências palavra a palavra são agrupadas por categoria para
 detectar padrões sistemáticos.
 
+O resultado do espeak-ng é persistido em espeak_sentences.json, de modo
+que execuções subsequentes só fonemizam sentenças ainda não cacheadas.
+
 Uso:
   python3 compare_sentences.py sentences.txt
   python3 compare_sentences.py sentences.txt --limite 100
@@ -42,6 +45,7 @@ from pathlib import Path
 DIRETORIO_PROJETO = Path(__file__).resolve().parent
 CAMINHO_WORKER = DIRETORIO_PROJETO / "target" / "release" / "phonemizer-worker"
 CAMINHO_CACHE = DIRETORIO_PROJETO / "cache"
+NOME_ARQUIVO_CACHE_ESPEAK = "espeak_sentences.json"
 
 CAMINHOS_NODE_MODULES = [
     DIRETORIO_PROJETO / "node_modules",
@@ -50,6 +54,7 @@ CAMINHOS_NODE_MODULES = [
 ]
 
 QUANTIDADE_THREADS_ESPEAK = 32
+INTERVALO_SALVAMENTO_CACHE = 500
 
 ABREVIACOES = {
     "sr", "sra", "srta", "dr", "dra", "prof", "profa", "eng",
@@ -104,7 +109,8 @@ def tokenizar_ipa(ipa):
 
 
 def eh_puramente_numerico(palavra):
-    return bool(palavra) and all(c.isdigit() and c.isascii() for c in palavra)
+    return bool(palavra) and all(caractere.isdigit() and caractere.isascii()
+                                 for caractere in palavra)
 
 
 def eh_sigla_sem_vogal(palavra):
@@ -114,11 +120,11 @@ def eh_sigla_sem_vogal(palavra):
         return False
     if not minuscula.isalpha():
         return False
-    return not any(c in VOGAIS_PORTUGUES for c in minuscula)
+    return not any(caractere in VOGAIS_PORTUGUES for caractere in minuscula)
 
 
 def precisa_normalizar(palavra):
-    if any(not c.isalpha() for c in palavra):
+    if any(not caractere.isalpha() for caractere in palavra):
         return True
     if palavra.lower() in ABREVIACOES:
         return True
@@ -127,21 +133,25 @@ def precisa_normalizar(palavra):
     return False
 
 
-def classificar_divergencia(a, b):
-    if a.replace("ˌ", "") == b.replace("ˌ", ""):
+def classificar_divergencia(fonemas_a, fonemas_b):
+    if fonemas_a.replace("ˌ", "") == fonemas_b.replace("ˌ", ""):
         return "acento-secundario"
-    if a.replace("ˈ", "") == b.replace("ˈ", ""):
+    if fonemas_a.replace("ˈ", "") == fonemas_b.replace("ˈ", ""):
         return "acento-primario"
-    if a.replace("ˈ", "").replace("ˌ", "") == b.replace("ˈ", "").replace("ˌ", ""):
+    if (fonemas_a.replace("ˈ", "").replace("ˌ", "")
+            == fonemas_b.replace("ˈ", "").replace("ˌ", "")):
         return "posicao-acento"
-    if len(a) == len(b):
-        diferencas = sum(1 for x, y in zip(a, b) if x != y)
+    if len(fonemas_a) == len(fonemas_b):
+        diferencas = sum(
+            1 for caractere_a, caractere_b in zip(fonemas_a, fonemas_b)
+            if caractere_a != caractere_b
+        )
         if diferencas == 1:
             return "1-char-diff"
         if diferencas <= 3:
             return f"{diferencas}-char-diff"
         return "varios-chars-diff"
-    diferenca_tamanho = abs(len(a) - len(b))
+    diferenca_tamanho = abs(len(fonemas_a) - len(fonemas_b))
     if diferenca_tamanho == 1:
         return "1-char-len"
     if diferenca_tamanho <= 3:
@@ -188,6 +198,36 @@ def filtrar_sentencas(sentencas, excecoes):
 
 
 # ---------------------------------------------------------------------------
+# Cache do espeak-ng
+# ---------------------------------------------------------------------------
+
+def caminho_arquivo_cache_espeak(diretorio_cache):
+    return diretorio_cache / NOME_ARQUIVO_CACHE_ESPEAK
+
+
+def carregar_cache_espeak(caminho_arquivo):
+    if not caminho_arquivo.exists():
+        return {}
+    try:
+        dados = json.loads(caminho_arquivo.read_text(encoding="utf-8"))
+        if isinstance(dados, dict):
+            return dados
+        return {}
+    except Exception:
+        return {}
+
+
+def salvar_cache_espeak(caminho_arquivo, cache):
+    try:
+        caminho_arquivo.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=0),
+            encoding="utf-8",
+        )
+    except Exception as erro:
+        imprimir(f"  AVISO: falha ao salvar cache do espeak: {erro}")
+
+
+# ---------------------------------------------------------------------------
 # Motores
 # ---------------------------------------------------------------------------
 
@@ -224,7 +264,7 @@ console.error(`js-loop: ${sentencas.length} em ${(Number(fim-inicio)/1e6).toFixe
 '''
 
 
-def rodar_vozz_js(sentencas, diretorio_node_modules, diretorio_cache):
+def rodar_vozz_javascript(sentencas, diretorio_node_modules, diretorio_cache):
     imprimir(f"→ Rodando vozz-g2p-js em {len(sentencas)} sentenças...")
     vozz = diretorio_node_modules / "@pedrobef" / "vozz"
     candidatos_entrypoint = [
@@ -233,7 +273,10 @@ def rodar_vozz_js(sentencas, diretorio_node_modules, diretorio_cache):
         vozz / "g2p" / "index.js",
         vozz / "index.js",
     ]
-    entrypoint = next((e for e in candidatos_entrypoint if e.exists()), None)
+    entrypoint = next(
+        (candidato for candidato in candidatos_entrypoint if candidato.exists()),
+        None,
+    )
     if entrypoint is None:
         imprimir("  ERRO: entrypoint não encontrado")
         return None
@@ -260,13 +303,13 @@ def rodar_vozz_js(sentencas, diretorio_node_modules, diretorio_cache):
     processo.wait()
     tempo_total = time.time() - inicio
     if processo.returncode != 0:
-        imprimir(f"ERRO: js falhou (rc={processo.returncode})")
+        imprimir(f"ERRO: js falhou (codigo de retorno={processo.returncode})")
         return None
     imprimir(f"→ JS: {tempo_total:.2f}s")
     return json.loads(caminho_saida.read_text(encoding="utf-8"))
 
 
-def rodar_vozz_rs(sentencas, caminho_worker):
+def rodar_vozz_rust(sentencas, caminho_worker):
     imprimir(f"→ Rodando vozz-g2p-rs em {len(sentencas)} sentenças...")
     linhas = []
     for sentenca in sentencas:
@@ -290,25 +333,30 @@ def rodar_vozz_rs(sentencas, caminho_worker):
     tempo_total = time.time() - inicio
 
     if resultado.returncode != 0:
-        imprimir(f"ERRO: rs falhou (rc={resultado.returncode}): {resultado.stderr[-400:]}")
+        imprimir(
+            f"ERRO: rs falhou (codigo de retorno={resultado.returncode}): "
+            f"{resultado.stderr[-400:]}"
+        )
         return None
 
     linhas_saida = resultado.stdout.strip().split("\n")
     if len(linhas_saida) != len(sentencas):
-        imprimir(f"  AVISO: {len(linhas_saida)} saídas para {len(sentencas)} entradas")
+        imprimir(
+            f"  AVISO: {len(linhas_saida)} saídas para {len(sentencas)} entradas"
+        )
 
-    ipas = []
+    fonemas_rust = []
     for linha in linhas_saida:
         try:
             resposta = json.loads(linha)
             sentencas_saida = resposta.get("sentences", [])
             ipa = " ".join(s["phonemes"] for s in sentencas_saida)
-            ipas.append(ipa)
+            fonemas_rust.append(ipa)
         except Exception:
-            ipas.append(None)
+            fonemas_rust.append(None)
 
     imprimir(f"→ RS: {tempo_total:.2f}s")
-    return ipas
+    return fonemas_rust
 
 
 def espeak_sentenca(sentenca):
@@ -322,52 +370,83 @@ def espeak_sentenca(sentenca):
         return None
 
 
-def rodar_espeak(sentencas):
+def rodar_espeak(sentencas, diretorio_cache):
     imprimir(f"→ Rodando espeak-ng em {len(sentencas)} sentenças "
              f"({QUANTIDADE_THREADS_ESPEAK} threads)...")
+
+    caminho_cache = caminho_arquivo_cache_espeak(diretorio_cache)
+    cache = carregar_cache_espeak(caminho_cache)
+    if cache:
+        imprimir(f"  Cache carregado: {len(cache)} entradas de {caminho_cache}")
+
+    sentencas_faltantes = [sentenca for sentenca in sentencas
+                           if sentenca not in cache]
+    imprimir(f"  Sentenças a fonemizar: {len(sentencas_faltantes)} "
+             f"(já em cache: {len(sentencas) - len(sentencas_faltantes)})")
+
+    if not sentencas_faltantes:
+        imprimir("→ espeak: todas as sentenças já estão no cache")
+        return [cache.get(sentenca) for sentenca in sentencas]
+
     inicio = time.time()
-    resultados = [None] * len(sentencas)
+    try:
+        with ThreadPoolExecutor(max_workers=QUANTIDADE_THREADS_ESPEAK) as executor:
+            futuros = {
+                executor.submit(espeak_sentenca, sentenca): sentenca
+                for sentenca in sentencas_faltantes
+            }
+            concluidos = 0
+            for futuro in as_completed(futuros):
+                sentenca = futuros[futuro]
+                try:
+                    cache[sentenca] = futuro.result()
+                except Exception:
+                    cache[sentenca] = None
+                concluidos += 1
+                if concluidos % INTERVALO_SALVAMENTO_CACHE == 0:
+                    salvar_cache_espeak(caminho_cache, cache)
+                    decorrido = time.time() - inicio
+                    imprimir(
+                        f"  [espeak] {concluidos}/{len(sentencas_faltantes)} "
+                        f"({decorrido:.0f}s) — cache salvo"
+                    )
+    except KeyboardInterrupt:
+        imprimir("  Interrompido! Salvando cache parcial...")
+        salvar_cache_espeak(caminho_cache, cache)
+        raise
 
-    with ThreadPoolExecutor(max_workers=QUANTIDADE_THREADS_ESPEAK) as executor:
-        futuros = {
-            executor.submit(espeak_sentenca, s): indice
-            for indice, s in enumerate(sentencas)
-        }
-        concluidos = 0
-        for futuro in as_completed(futuros):
-            indice = futuros[futuro]
-            try:
-                resultados[indice] = futuro.result()
-            except Exception:
-                resultados[indice] = None
-            concluidos += 1
-            if concluidos % 500 == 0 or concluidos == len(sentencas):
-                decorrido = time.time() - inicio
-                imprimir(f"  [espeak] {concluidos}/{len(sentencas)} ({decorrido:.0f}s)")
-
+    salvar_cache_espeak(caminho_cache, cache)
     tempo_total = time.time() - inicio
-    imprimir(f"→ espeak: {tempo_total:.2f}s")
-    return resultados
+    imprimir(
+        f"→ espeak: {tempo_total:.2f}s "
+        f"({len(sentencas_faltantes)} novas, {len(cache)} no cache)"
+    )
+    return [cache.get(sentenca) for sentenca in sentencas]
 
 
 # ---------------------------------------------------------------------------
 # Comparação
 # ---------------------------------------------------------------------------
 
-def comparar_sentencas(ipas_a, ipas_b, nome_a, nome_b):
+def comparar_sentencas(fonemas_a, fonemas_b, nome_a, nome_b):
     """Compara sentença por sentença."""
     total = 0
     iguais = 0
     divergencias = []
 
-    for indice, (a, b) in enumerate(zip(ipas_a, ipas_b)):
-        if a is None or b is None:
+    for indice, (fonemas_sentenca_a, fonemas_sentenca_b) in enumerate(
+            zip(fonemas_a, fonemas_b)):
+        if fonemas_sentenca_a is None or fonemas_sentenca_b is None:
             continue
         total += 1
-        if normalizar_ipa(a) == normalizar_ipa(b):
+        if normalizar_ipa(fonemas_sentenca_a) == normalizar_ipa(fonemas_sentenca_b):
             iguais += 1
         else:
-            divergencias.append((indice, normalizar_ipa(a), normalizar_ipa(b)))
+            divergencias.append((
+                indice,
+                normalizar_ipa(fonemas_sentenca_a),
+                normalizar_ipa(fonemas_sentenca_b),
+            ))
 
     return {
         "name": f"{nome_a} vs {nome_b}",
@@ -377,7 +456,7 @@ def comparar_sentencas(ipas_a, ipas_b, nome_a, nome_b):
     }
 
 
-def comparar_palavras(ipas_a, ipas_b, nome_a, nome_b, sentencas):
+def comparar_palavras(fonemas_a, fonemas_b, nome_a, nome_b, sentencas):
     """Compara palavra a palavra dentro das sentenças.
 
     Só considera sentenças onde as duas versões têm o mesmo número de
@@ -388,11 +467,12 @@ def comparar_palavras(ipas_a, ipas_b, nome_a, nome_b, sentencas):
     iguais = 0
     estruturais = 0
 
-    for indice, (a, b) in enumerate(zip(ipas_a, ipas_b)):
-        if a is None or b is None:
+    for indice, (fonemas_sentenca_a, fonemas_sentenca_b) in enumerate(
+            zip(fonemas_a, fonemas_b)):
+        if fonemas_sentenca_a is None or fonemas_sentenca_b is None:
             continue
-        tokens_a = tokenizar_ipa(normalizar_ipa(a))
-        tokens_b = tokenizar_ipa(normalizar_ipa(b))
+        tokens_a = tokenizar_ipa(normalizar_ipa(fonemas_sentenca_a))
+        tokens_b = tokenizar_ipa(normalizar_ipa(fonemas_sentenca_b))
 
         if len(tokens_a) != len(tokens_b):
             estruturais += 1
@@ -400,9 +480,9 @@ def comparar_palavras(ipas_a, ipas_b, nome_a, nome_b, sentencas):
 
         tokens_texto = tokenizar_texto(sentencas[indice])
 
-        for posicao, (ta, tb) in enumerate(zip(tokens_a, tokens_b)):
+        for posicao, (token_a, token_b) in enumerate(zip(tokens_a, tokens_b)):
             total_tokens += 1
-            if ta == tb:
+            if token_a == token_b:
                 iguais += 1
             else:
                 palavra = (
@@ -410,7 +490,9 @@ def comparar_palavras(ipas_a, ipas_b, nome_a, nome_b, sentencas):
                     if posicao < len(tokens_texto)
                     else f"[{posicao}]"
                 )
-                divergencias.append((palavra, ta, tb, sentencas[indice]))
+                divergencias.append((
+                    palavra, token_a, token_b, sentencas[indice]
+                ))
 
     return {
         "name": f"{nome_a} vs {nome_b}",
@@ -425,11 +507,11 @@ def agrupar_por_categoria(divergencias, limite_exemplos=5):
     categorias = Counter()
     exemplos = defaultdict(list)
 
-    for palavra, a, b, _sentenca in divergencias:
-        categoria = classificar_divergencia(a, b)
+    for palavra, fonemas_a, fonemas_b, _sentenca in divergencias:
+        categoria = classificar_divergencia(fonemas_a, fonemas_b)
         categorias[categoria] += 1
         if len(exemplos[categoria]) < limite_exemplos:
-            exemplos[categoria].append((palavra, a, b))
+            exemplos[categoria].append((palavra, fonemas_a, fonemas_b))
 
     return categorias, exemplos
 
@@ -499,22 +581,24 @@ def main():
         imprimir("ERRO: vozz-js não encontrado. Rode compare_vozz.py antes.")
         sys.exit(1)
 
-    ipas_js = rodar_vozz_js(sentencas, diretorio_node_modules, diretorio_cache)
-    if ipas_js is None:
+    fonemas_javascript = rodar_vozz_javascript(
+        sentencas, diretorio_node_modules, diretorio_cache
+    )
+    if fonemas_javascript is None:
         sys.exit(1)
 
-    ipas_rs = rodar_vozz_rs(sentencas, CAMINHO_WORKER)
-    if ipas_rs is None:
+    fonemas_rust = rodar_vozz_rust(sentencas, CAMINHO_WORKER)
+    if fonemas_rust is None:
         sys.exit(1)
 
-    ipas_es = rodar_espeak(sentencas)
+    fonemas_espeak = rodar_espeak(sentencas, diretorio_cache)
 
     (diretorio_cache / "sentencas_resultados.json").write_text(
         json.dumps({
             "sentencas": sentencas,
-            "js": ipas_js,
-            "rs": ipas_rs,
-            "espeak": ipas_es,
+            "js": fonemas_javascript,
+            "rs": fonemas_rust,
+            "espeak": fonemas_espeak,
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -525,15 +609,16 @@ def main():
     imprimir("=" * 72)
 
     pares_sentenca = [
-        comparar_sentencas(ipas_js, ipas_rs, "vozz-js", "vozz-rs"),
-        comparar_sentencas(ipas_rs, ipas_es, "vozz-rs", "espeak"),
-        comparar_sentencas(ipas_js, ipas_es, "vozz-js", "espeak"),
+        comparar_sentencas(fonemas_javascript, fonemas_rust, "vozz-js", "vozz-rs"),
+        comparar_sentencas(fonemas_rust, fonemas_espeak, "vozz-rs", "espeak"),
+        comparar_sentencas(fonemas_javascript, fonemas_espeak, "vozz-js", "espeak"),
     ]
-    for par in pares_sentenca:
-        if par["total"]:
-            percentual = par["match"] / par["total"] * 100
+    for par_sentenca in pares_sentenca:
+        if par_sentenca["total"]:
+            percentual = par_sentenca["match"] / par_sentenca["total"] * 100
             imprimir(
-                f"  {par['name']:<20} {par['match']:>6}/{par['total']:<6} = "
+                f"  {par_sentenca['name']:<20} "
+                f"{par_sentenca['match']:>6}/{par_sentenca['total']:<6} = "
                 f"{percentual:.2f}%"
             )
 
@@ -543,37 +628,45 @@ def main():
     imprimir("=" * 72)
 
     pares_palavra = [
-        comparar_palavras(ipas_js, ipas_rs, "vozz-js", "vozz-rs", sentencas),
-        comparar_palavras(ipas_rs, ipas_es, "vozz-rs", "espeak", sentencas),
-        comparar_palavras(ipas_js, ipas_es, "vozz-js", "espeak", sentencas),
+        comparar_palavras(fonemas_javascript, fonemas_rust,
+                          "vozz-js", "vozz-rs", sentencas),
+        comparar_palavras(fonemas_rust, fonemas_espeak,
+                          "vozz-rs", "espeak", sentencas),
+        comparar_palavras(fonemas_javascript, fonemas_espeak,
+                          "vozz-js", "espeak", sentencas),
     ]
-    for par in pares_palavra:
-        if par["total"]:
-            percentual = par["match"] / par["total"] * 100
+    for par_palavra in pares_palavra:
+        if par_palavra["total"]:
+            percentual = par_palavra["match"] / par_palavra["total"] * 100
             imprimir(
-                f"  {par['name']:<20} {par['match']:>6}/{par['total']:<6} = "
+                f"  {par_palavra['name']:<20} "
+                f"{par_palavra['match']:>6}/{par_palavra['total']:<6} = "
                 f"{percentual:.2f}%  "
-                f"(sentenças estruturais: {par['estruturais']})"
+                f"(sentenças estruturais: {par_palavra['estruturais']})"
             )
 
-    for par in pares_palavra:
-        if not par["difs"]:
+    for par_palavra in pares_palavra:
+        if not par_palavra["difs"]:
             continue
         imprimir("")
         imprimir("=" * 72)
-        imprimir(f"PADRÕES — {par['name']}")
+        imprimir(f"PADRÕES — {par_palavra['name']}")
         imprimir("=" * 72)
         categorias, exemplos = agrupar_por_categoria(
-            par["difs"], argumentos.max_exemplos
+            par_palavra["difs"], argumentos.max_exemplos
         )
-        total_difs = len(par["difs"])
+        total_divergencias = len(par_palavra["difs"])
         for categoria, quantidade in categorias.most_common():
-            percentual = quantidade / total_difs * 100
-            imprimir(f"  {categoria:<25} {quantidade:>7}  ({percentual:>5.1f}%)")
-            for palavra, a, b in exemplos[categoria]:
-                a_disp = a if len(a) <= 30 else a[:27] + "..."
-                b_disp = b if len(b) <= 30 else b[:27] + "..."
-                imprimir(f"      {palavra:<20} {a_disp:<32} → {b_disp}")
+            percentual = quantidade / total_divergencias * 100
+            imprimir(
+                f"  {categoria:<25} {quantidade:>7}  ({percentual:>5.1f}%)"
+            )
+            for palavra, fonemas_a, fonemas_b in exemplos[categoria]:
+                texto_a = (fonemas_a if len(fonemas_a) <= 30
+                           else fonemas_a[:27] + "...")
+                texto_b = (fonemas_b if len(fonemas_b) <= 30
+                           else fonemas_b[:27] + "...")
+                imprimir(f"      {palavra:<20} {texto_a:<32} → {texto_b}")
             imprimir("")
 
 

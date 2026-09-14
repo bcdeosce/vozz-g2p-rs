@@ -5,10 +5,23 @@ compare_vozz.py
 Compara vozz-js x vozz-rs x espeak-ng palavra a palavra, filtrando
 apenas palavras que NÃO passam por normalização.
 
-Filtro: só compara palavras puramente alfabéticas que não são
+FILTRO: só compara palavras puramente alfabéticas que não são
 abreviações conhecidas. Tudo que exige normalização (números, símbolos,
 abreviações, datas, horas) é descartado da comparação — porque a
 normalização é uma política, não uma questão de fonetização.
+
+CORREÇÕES v2:
+
+  1. Léxico agora é construído APENAS a partir da divergência do RS,
+     não mais de `rs != espeak OR js != espeak`. Isso evita que a
+     divergência do JS (que é ~50% do corpus e irrelevante para o
+     léxico do RS) infle o arquivo.
+
+  2. Comparação para inclusão no léxico é feita com `norm()` dos dois
+     lados, alinhada com a comparação do relatório.
+
+  3. Verificação e instalação automática do espeak-ng caso não esteja
+     no PATH. Detecta apt/apt-get/dnf/yum/pacman/brew/apk/zypper.
 
 Uso:
   python3 compare_vozz.py corpus.txt
@@ -16,6 +29,7 @@ Uso:
   python3 compare_vozz.py corpus.txt --force-espeak
   python3 compare_vozz.py corpus.txt --no-test
   python3 compare_vozz.py corpus.txt --incluir-normalizadas
+  python3 compare_vozz.py corpus.txt --no-instalar-espeak
 """
 
 import argparse
@@ -48,8 +62,6 @@ CANDIDATOS_NODE_MODULES = [
 ESPEAK_THREADS = 32
 
 # Espelha ABREVIACOES do src/normalize.rs.
-# Só as chaves que são alfabéticas puras (sem ponto, sem símbolo) e
-# que poderiam passar pelo filtro de "alfabético".
 ABREVIACOES = {
     "sr", "sra", "srta", "dr", "dra", "prof", "profa", "eng",
     "av", "r", "pç", "ed", "apto", "ap", "pág", "pag", "fig",
@@ -78,14 +90,8 @@ def norm(s):
 
 
 def precisa_normalizar(palavra):
-    """Espelha `precisa_normalizar` do src/normalize.rs.
-
-    Retorna True se a palavra precisa passar pelo normalizador.
-    """
-    # Qualquer caractere que não seja letra → precisa normalizar.
     if any(not c.isalpha() for c in palavra):
         return True
-    # Abreviação conhecida → precisa normalizar.
     return palavra.lower() in ABREVIACOES
 
 
@@ -112,12 +118,6 @@ def classificar_divergencia(a, b):
 
 
 def extrair_palavras(texto, incluir_normalizadas=False):
-    """Extrai palavras únicas do corpus.
-
-    Por padrão, descarta palavras que precisam de normalização
-    (números, símbolos, abreviações). Isso deixa a comparação focada
-    em fonetização pura.
-    """
     tokens = re.findall(r"[\w'-]+", texto, re.UNICODE)
     s = set()
     descartadas = 0
@@ -125,7 +125,6 @@ def extrair_palavras(texto, incluir_normalizadas=False):
         limpo = t.lower().strip("'-")
         if len(limpo) < 2:
             continue
-        # Trata hífen: cada parte vira palavra separada.
         partes = [limpo]
         if "-" in limpo:
             partes = [p.strip("'-") for p in limpo.split("-")]
@@ -138,6 +137,79 @@ def extrair_palavras(texto, incluir_normalizadas=False):
             s.add(p)
 
     return sorted(s), descartadas
+
+
+# ---------------------------------------------------------------------------
+# Instalação do espeak-ng
+# ---------------------------------------------------------------------------
+
+def _comando_instalacao(base_cmd):
+    """Prefixa com sudo se necessário e disponível."""
+    if os.geteuid() == 0:
+        return base_cmd
+    if shutil.which("sudo"):
+        return ["sudo"] + base_cmd
+    return base_cmd
+
+
+def verificar_espeak_instalado():
+    """
+    Verifica se espeak-ng está instalado. Se não estiver, tenta instalar
+    automaticamente detectando o gerenciador de pacotes disponível.
+    """
+    if shutil.which("espeak-ng"):
+        log("→ espeak-ng: ✓ encontrado")
+        return True
+
+    log("→ espeak-ng não encontrado. Tentando instalar automaticamente...")
+
+    gerenciadores = [
+        ("apt-get", ["apt-get", "install", "-y", "espeak-ng"]),
+        ("apt",     ["apt",     "install", "-y", "espeak-ng"]),
+        ("dnf",     ["dnf",     "install", "-y", "espeak-ng"]),
+        ("yum",     ["yum",     "install", "-y", "espeak-ng"]),
+        ("pacman",  ["pacman",  "-S", "--noconfirm", "espeak-ng"]),
+        ("zypper",  ["zypper",  "install", "-y", "espeak-ng"]),
+        ("apk",     ["apk",     "add", "espeak-ng"]),
+        ("brew",    ["brew",    "install", "espeak-ng"]),
+    ]
+
+    for nome, base_cmd in gerenciadores:
+        if not shutil.which(nome):
+            continue
+
+        log(f"  → gerenciador detectado: {nome}")
+        cmd = _comando_instalacao(base_cmd)
+
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=600
+            )
+            if r.returncode == 0:
+                log(f"  ✓ instalado com {nome}")
+                if shutil.which("espeak-ng"):
+                    return True
+                log("  ⚠ instalado, mas ainda não está no PATH.")
+                log("    Reinicie o shell ou verifique manualmente.")
+                return False
+            else:
+                msg = (r.stderr or r.stdout or "").strip().split("\n")[-1]
+                log(f"  ⚠ falhou com {nome}: {msg[:200]}")
+        except subprocess.TimeoutExpired:
+            log(f"  ⚠ timeout com {nome}")
+        except Exception as e:
+            log(f"  ⚠ erro com {nome}: {e}")
+
+    log("")
+    log("  ✗ Não foi possível instalar automaticamente.")
+    log("    Instale manualmente:")
+    log("      Debian/Ubuntu: sudo apt-get install espeak-ng")
+    log("      Fedora/RHEL:   sudo dnf install espeak-ng")
+    log("      Arch:          sudo pacman -S espeak-ng")
+    log("      Alpine:        sudo apk add espeak-ng")
+    log("      openSUSE:      sudo zypper install espeak-ng")
+    log("      macOS:         brew install espeak-ng")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +520,8 @@ def main():
                         help="Pular cargo test")
     parser.add_argument("--incluir-normalizadas", action="store_true",
                         help="Não filtrar palavras que precisam de normalização")
+    parser.add_argument("--no-instalar-espeak", action="store_true",
+                        help="Não tentar instalar espeak-ng automaticamente")
     args = parser.parse_args()
 
     corpus_path = Path(args.corpus).resolve()
@@ -523,7 +597,15 @@ def main():
         else:
             log("→ espeak.json válido. Reaproveitando cache.")
 
-    # 5. js
+    # 5. Verifica espeak-ng ANTES de decidir se vai rodar
+    if refazer_espeak or not args.no_test:
+        if not args.no_instalar_espeak:
+            if not verificar_espeak_instalado():
+                log("")
+                log("Abortando: espeak-ng é necessário.")
+                sys.exit(1)
+
+    # 6. js
     t_js_loop = 0.0
     if refazer_js:
         nm = instalar_vozz_js(cache_dir)
@@ -539,7 +621,7 @@ def main():
         log("→ js.json do cache.")
         js = json.loads(js_path.read_text(encoding="utf-8"))
 
-    # 6. espeak
+    # 7. espeak
     t_espeak_wall = 0.0
     if refazer_espeak:
         espeak, t_espeak_wall = rodar_espeak(palavras, cache_dir)
@@ -549,13 +631,13 @@ def main():
         log("→ espeak.json do cache.")
         espeak = json.loads(espeak_path.read_text(encoding="utf-8"))
 
-    # 7. rs
+    # 8. rs
     rs, t_rs_loop = rodar_rs(palavras, cache_dir)
     if rs is None:
         log("ERRO: rs falhou.")
         sys.exit(1)
 
-    # 8. Tempos
+    # 9. Tempos
     (cache_dir / "tempos.json").write_text(json.dumps({
         "js_loop_ms": t_js_loop,
         "rs_loop_ms": t_rs_loop,
@@ -566,7 +648,7 @@ def main():
     }, indent=2), encoding="utf-8")
     hash_path.write_text(corpus_hash, encoding="utf-8")
 
-    # 9. Comparações
+    # 10. Comparações
     log("")
     log("=" * 72)
     log("SUMÁRIO")
@@ -585,7 +667,7 @@ def main():
                 f"  (sem saída: {p['pulados']})"
             )
 
-    # 10. Léxico
+    # 11. Léxico — CORRIGIDO: só divergência do RS, comparação normalizada.
     n_lex = 0
     if espeak:
         lexico = {}
@@ -593,8 +675,10 @@ def main():
             e = espeak.get(p)
             if not e:
                 continue
-            if rs.get(p) != e or js.get(p) != e:
-                lexico[p] = norm(e)
+            rs_norm = norm(rs.get(p) or "")
+            e_norm = norm(e)
+            if rs_norm != e_norm:
+                lexico[p] = e_norm
         lex_path = cache_dir / "lexico_espeak.json"
         lex_path.write_text(
             json.dumps(lexico, ensure_ascii=False, indent=2, sort_keys=True),
@@ -602,8 +686,9 @@ def main():
         )
         n_lex = len(lexico)
         log(f"\nLéxico: {n_lex} entradas → {lex_path}")
+        log(f"  ({n_lex / len(palavras) * 100:.1f}% do corpus)")
 
-    # 11. Relatório
+    # 12. Relatório
     linhas = []
     linhas.append("=" * 100)
     linhas.append("RELATÓRIO — vozz-js x vozz-rs x espeak-ng pt-br")
@@ -619,7 +704,7 @@ def main():
     linhas.append(f"  rs loop     : {t_rs_loop:>10.1f} ms")
     if t_espeak_wall:
         linhas.append(f"  espeak wall : {t_espeak_wall:>10.1f} s")
-    linhas.append(f"  Léxico      : {n_lex} entradas")
+    linhas.append(f"  Léxico      : {n_lex} entradas ({n_lex / len(palavras) * 100:.1f}%)")
     linhas.append("")
     linhas.append("SUMÁRIO")
     for p in pares:
