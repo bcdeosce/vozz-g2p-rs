@@ -1,4 +1,3 @@
-```markdown
 # Relatórios de Desenvolvimento — vozz-g2p-rs
 
 Este documento compila os **relatórios de benchmark e validação** do port
@@ -67,11 +66,9 @@ por intuição — cada uma partiu de uma divergência empírica observada em
 `vozz-rs vs espeak`.
 
 O ciclo:
-
-```
 Rodar benchmark → Analisar divergências → Classificar padrões
 → Aplicar correção (regra ou léxico) → Rodar benchmark novamente
-```
+
 
 ### 3.2 Scripts auxiliares
 
@@ -395,4 +392,4 @@ Os erros residuais são dominados por:
 O projeto é **funcional para produção** no domínio pt-BR em que foi testado.
 Expansões futuras (POS tagger, léxico de nomes próprios) podem elevar a
 acurácia além disso, mas com custo marginal crescente.
-```
+
