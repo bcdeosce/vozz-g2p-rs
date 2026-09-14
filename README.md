@@ -6,6 +6,12 @@ Este projeto é um **fork/porte do [Vozz](https://github.com/Pedro21062014/vozz)
 
 ---
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Fidelity espeak-ng](https://img.shields.io/badge/espeak--ng%20pt--br-97%25-success.svg)]()
+[![Homógrafos](https://img.shields.io/badge/hom%C3%B3grafos-97.7%25-success.svg)]()
+
 ## Índice
 
 - [Motivação](#motivação)
@@ -95,6 +101,26 @@ vozz-g2p-rs = { git = "https://github.com/bcdeosce/vozz-g2p-rs" }
 ```
 
 ---
+
+## Arquivos de dados e léxicos
+
+O pipeline usa **5 léxicos** em cascata. Cada um tem um propósito distinto:
+
+| Arquivo | Entradas | Escopo | Geração |
+|---------|----------|--------|---------|
+| `data/lexicon_palavra.json` | ~200 | Palavras isoladas + clíticos | Curadoria manual |
+| `data/lexicon_contexto.json` | ~70 | Clíticos + palavras funcionais em contexto | Curadoria manual |
+| `cache/lexico_espeak.json` | ~51k | Formas isoladas do espeak | `compare_vozz.py` |
+| `cache/lexico_espeak_contexto.json` | ~3.4k | Formas contextuais do espeak | `gerar_lexicon_espeak_contexto.py` |
+| `cache/lexicon_homografos.json` | ~131 | `(palavra, sentido) → IPA` | `gerar_lexicon_homografos.py` |
+
+### Como regenerar cada um
+
+**`lexico_espeak.json`** (espeak isolado, ~51k entradas):
+```bash
+python3 compare_vozz.py corpus.txt
+# Lê o corpus, extrai palavras únicas, roda espeak-ng,
+# salva em cache/lexico_espeak.json
 
 ## Uso como biblioteca Rust
 
@@ -632,6 +658,63 @@ Cobre **~150 testes unitários** distribuídos em:
 - `splitter`: sentenças simples, abreviações, decimais, parágrafos, reticências, aspas.
 - `g2p`: silabificação, acentuação, mapeamento de onset/núcleo/coda, ditongos, nasalização, regra do `x`, prefixo `ex-`, sândi, etc.
 
+
+
+
+
+---
+
+## 6. FAQ
+
+```markdown
+## FAQ
+
+**Por que Rust e não manter em JavaScript?**
+
+Performance. Em palavras isoladas, o Rust é ~2,5x mais rápido que o JS
+(~16 µs vs ~40 µs por palavra). Além disso, um binário nativo integra
+melhor em pipelines Python, C++, Go, e em servidores de TTS. Em sentenças,
+o JS é mais rápido porque o pipeline Rust faz mais trabalho (classificador
+de homógrafos + 5 léxicos em cascata + sândi inter-palavra), mas o ganho
+por palavra se materializa quando o custo por palavra domina.
+
+**Por que o `espeak-ng` é o gabarito?**
+
+Porque modelos neurais de TTS para pt-BR (Piper, Coqui, VITS) usam a
+convenção IPA do espeak-ng para treinar. Ser fiel ao espeak-ng significa
+ser fiel à convenção com que os modelos são treinados.
+
+**Por que não portar o Bifonia inteiro?**
+
+O Bifonia é pt-PT, tem dois motores (regras + NB) com ensemble, e usa
+`.voc` wordlists curadas manualmente. O que faz sentido para pt-BR é
+o motor NB com features sintáticas + o dataset adaptado. O motor de
+regras baseado em `.voc` não foi portado porque as regras do nosso G2P
+já cobrem a fonologia do pt-BR. O Bifonia original continua sendo a
+referência arquitetural do classificador.
+
+**A acurácia de 97% vale para qualquer texto?**
+
+Não. Os 97% são medidos em corpora específicos: médico e Bifonia (sintético).
+Em domínio diferente (Leipzig, notícias), cai para 93% em sentenças e 82,6%
+em palavras únicas — porque notícias trazem nomes próprios, estrangeirismos
+e siglas que nenhum dos dois motores lida bem. Em vocabulário comum, a
+taxa volta à faixa de 90-95%.
+
+**Como sei que o modelo de homógrafos não está overfitado?**
+
+O modelo foi validado em três corpora. O held-out do dataset Bifonia deu
+98,58%. O corpus Bifonia completo deu 96,26%. O corpus Leipzig (nunca
+visto no treino) deu 97,74%. A proximidade entre os três sugere que o
+modelo generaliza.
+
+**Onde encontro o relatório completo de desenvolvimento?**
+
+Em [`desenvolvimento/Relatorio.md`](https://github.com/bcdeosce/vozz-g2p-rs/blob/main/desenvolvimento/Relatorio.md).
+Lá estão os números de cada iteração, a metodologia de descoberta de
+regras, o uso de LLM (DeepSeek via DeepInfra) como anotador, e os
+créditos das licenças dos corpora.
+
 ---
 
 ## Licença
@@ -665,6 +748,31 @@ Para bug reports, inclua:
 - IPA produzido
 - IPA esperado (do `espeak-ng -v pt-br --ipa=3 -q "palavra"`)
 - Contexto (se for influenciado por palavras vizinhas)
+
+
+## Notificação aos autores originais
+
+Este projeto é um fork do [Vozz](https://github.com/Pedro21062014/vozz)
+e uma **adaptação arquitetural** do [Bifonia](https://github.com/TigreGotico/bifonia).
+
+Ambos os projetos originais são licenciados sob Apache 2.0, o que permite
+fork, modificação e redistribuição. Os autores foram notificados por
+cortesia profissional:
+
+- **Vozz** (Pedro Berbis Freire): notificado via Issue no GitHub
+- **Bifonia** (TigreGotico): notificado via `contact@tigregotico.pt`
+
+Nenhum código do Bifonia foi reutilizado. A adaptação para Rust foi feita
+do zero, mas a arquitetura conceitual do classificador NB (features
+`prev_word`, `next_word`, `prev_class`, `next_class`, `is_first`,
+`pos_in_sent`) vem do Bifonia.
+
+O Vozz é o fork original do projeto. As regras fonológicas, o léxico
+base e o protocolo do worker vêm de lá. As correções feitas neste port
+estão documentadas na seção [Diferenças em relação ao Vozz original](#diferenças-em-relação-ao-vozz-original).
+
+
+
 
 ---
 
