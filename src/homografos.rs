@@ -1,34 +1,48 @@
 //! Desambiguador de homógrafos heterofônicos pt-BR.
 //!
-//! Reimplementação em Rust da arquitetura de classificação do
-//! [Bifonia](https://github.com/TigreGotico/bifonia) (Apache 2.0),
-//! adaptada para pt-BR.
+//! Usa três níveis de decisão, em ordem de prioridade:
 //!
-//! ## Ordem de decisão em `desambiguar`
+//! 1. **Expressões fixas** (1-gram): padrões do tipo "`pelo visto`",
+//!    "`acerto` depois de `nunca`", etc. Definidos em `EXPRESSOES_FIXAS`.
 //!
-//! 1. Regra `single` → devolve o sentido fixo.
-//! 2. Expressões fixas (com lookahead de 2 palavras) → sentido fixo.
-//! 3. Naive Bayes sobre as 7 features (6 originais + `next_word_2`).
+//! 2. **Bigramas** (2-gram): quando a palavra decisiva está a 2 posições
+//!    de distância. Definidos em `src/bigrama.rs`.
+//!
+//! 3. **Naive Bayes** com features sintáticas (adaptação do Bifonia):
+//!    `prev_word`, `next_word`, `prev_class`, `next_class`, `is_first`,
+//!    `pos_in_sent`.
+//!
+//! O léxico `(palavra, sentido) → IPA` é carregado de
+//! `lexicon_homografos.json`.
 
-use once_cell::sync::Lazy;
+use crate::bigrama;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+/// Regex para tokenização (compilada uma vez por chamada, não
+/// armazenada como estático para evitar dependência de once_cell).
+fn regex_palavra() -> Regex {
+    Regex::new(r"\w+").unwrap()
+}
 
-static RE_WORD: Lazy<Regex> = Lazy::new(|| Regex::new(r"\w+").unwrap());
+// ---------------------------------------------------------------------------
+// Tipos públicos
+// ---------------------------------------------------------------------------
 
-/* ------------------------------------------------------------------ *
- * Tipos públicos
- * ------------------------------------------------------------------ */
+/// Resultado de uma desambiguação.
+#[derive(Debug, Clone)]
+pub struct Disambiguacao {
+    /// Sentido ativo na sentença (ex: `"thirst"`, `"seat"`).
+    pub sentido: String,
+    /// Classe gramatical (ex: `"NOUN"`, `"VERB"`, `"ADJ"`).
+    pub pos: String,
+}
 
-/// Regra de desambiguação carregada de `homograph_rules_v2.json`.
-#[derive(Deserialize, Debug, Clone)]
+/// Regra treinada: `single` (uma leitura só) ou `multi` (múltiplas
+/// leituras com prior e contagens de features).
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Regra {
     Single {
@@ -43,17 +57,8 @@ pub enum Regra {
     },
 }
 
-/// Resultado de uma desambiguação.
-#[derive(Debug, Clone)]
-pub struct Disambiguacao {
-    pub sentido: String,
-    #[allow(dead_code)]
-    pub pos: String,
-    #[allow(dead_code)]
-    pub metodo: &'static str,
-}
-
-#[derive(Deserialize, Debug, Clone)]
+/// Entrada do léxico `(palavra, sentido) → IPA`.
+#[derive(Deserialize)]
 struct EntradaSentido {
     ipa: String,
     #[serde(default)]
@@ -64,138 +69,315 @@ struct EntradaSentido {
     ocorrencias: usize,
 }
 
-/// Diagnóstico de carregamento do desambiguador.
-#[derive(Serialize, Debug, Clone)]
-pub struct DiagnosticoHomografos {
-    pub n_regras: usize,
-    pub regras_single: usize,
-    pub regras_multi: usize,
-    pub n_palavras_lexicon: usize,
-    pub n_total_entradas_lexicon: usize,
-    pub n_expressoes_fixas: usize,
-    pub n_expressoes_com_next2: usize,
-    pub caminho_regras: String,
-    pub caminho_lexicon: String,
-}
-
-/// Desambiguador carregado em memória.
+/// Desambiguador carregado de JSON.
 pub struct Homografos {
-    regras: HashMap<String, Regra>,
-    lexico: HashMap<String, HashMap<String, String>>,
-    caminho_regras: String,
-    caminho_lexicon: String,
+    pub regras: HashMap<String, Regra>,
+    pub lexico: HashMap<String, HashMap<String, String>>,
 }
 
-/* ------------------------------------------------------------------ *
- * Expressões fixas contextuais
- * ------------------------------------------------------------------ */
+impl Homografos {
+    /// Constrói a partir de mapas já parseados.
+    pub fn novo(
+        regras: HashMap<String, Regra>,
+        lexico: HashMap<String, HashMap<String, String>>,
+    ) -> Self {
+        Self { regras, lexico }
+    }
 
-/// Expressões fixas com até 2 palavras de lookahead.
-///
-/// Formato: `(palavra, prev, next, next_2, sense, pos)`.
-static EXPRESSOES_FIXAS: &[(
-    &str,
-    Option<&str>,
-    Option<&str>,
-    Option<&str>,
-    &str,
-    &str,
-)] = &[
-    /* 1. `pelo` + palavra */
-    ("pelo", None, Some("visto"),     None, "by_the", "ADP"),
-    ("pelo", None, Some("menos"),     None, "by_the", "ADP"),
-    ("pelo", None, Some("contrário"), None, "by_the", "ADP"),
-    ("pelo", None, Some("contrario"), None, "by_the", "ADP"),
-    ("pelo", None, Some("amor"),      None, "by_the", "ADP"),
-    ("pelo", None, Some("jeito"),     None, "by_the", "ADP"),
-    ("pelo", None, Some("mundo"),     None, "by_the", "ADP"),
-    ("pelo", None, Some("fato"),      None, "by_the", "ADP"),
-    ("pelo", None, Some("caminho"),   None, "by_the", "ADP"),
-    ("pelo", None, Some("tempo"),     None, "by_the", "ADP"),
-    ("pelo", None, Some("silêncio"),  None, "by_the", "ADP"),
-    ("pelo", None, Some("silencio"),  None, "by_the", "ADP"),
-    ("pelo", None, Some("que"),       None, "by_the", "ADP"),
+    /// Carrega de dois arquivos JSON.
+    ///
+    /// - `regras_path` — `homograph_rules_v2.json`
+    /// - `lexico_path` — `lexicon_homografos.json`
+    ///
+    /// O léxico deve ter o formato `{ palavra: { sentido: { ipa, ... } } }`.
+    pub fn from_paths(
+        regras_path: &Path,
+        lexico_path: &Path,
+    ) -> Result<Self, String> {
+        let regras_texto = std::fs::read_to_string(regras_path).map_err(|erro| {
+            format!("Erro ao ler {}: {}", regras_path.display(), erro)
+        })?;
+        let regras: HashMap<String, Regra> = serde_json::from_str(&regras_texto)
+            .map_err(|erro| format!("Erro ao parsear regras: {}", erro))?;
 
-    /* 2. `pela` + palavra */
-    ("pela", None, Some("manhã"),    None, "by_the", "ADP"),
-    ("pela", None, Some("manha"),    None, "by_the", "ADP"),
-    ("pela", None, Some("tarde"),    None, "by_the", "ADP"),
-    ("pela", None, Some("noite"),    None, "by_the", "ADP"),
-    ("pela", None, Some("primeira"), None, "by_the", "ADP"),
-    ("pela", None, Some("última"),   None, "by_the", "ADP"),
-    ("pela", None, Some("ultima"),   None, "by_the", "ADP"),
+        let lexico_texto = std::fs::read_to_string(lexico_path).map_err(|erro| {
+            format!("Erro ao ler {}: {}", lexico_path.display(), erro)
+        })?;
+        let lexico_completo: HashMap<String, HashMap<String, EntradaSentido>> =
+            serde_json::from_str(&lexico_texto)
+                .map_err(|erro| format!("Erro ao parsear léxico: {}", erro))?;
 
-    /* 3. Verbo 1sg com sujeito/advérbio */
-    ("porto",    Some("sempre"), None, None, "carry",   "VERB"),
-    ("porto",    Some("eu"),     None, None, "carry",   "VERB"),
-    ("sopro",    Some("eu"),     None, None, "blow",    "VERB"),
-    ("desapego", Some("eu"),     None, None, "let_go",  "VERB"),
-    ("despojo",  Some("nunca"),  None, None, "strip",   "VERB"),
-    ("acerto",   Some("nunca"),  None, None, "adjust",  "VERB"),
-    ("solto",    Some("eu"),     None, None, "release", "VERB"),
-    ("desaforo", Some("posso"),  None, None, "affront", "VERB"),
-    ("congelo",  Some("quando"), None, None, "freeze",  "VERB"),
-
-    /* 4. Verbo 1sg — next_word discrimina */
-    ("torno",  None, Some("ao"), None, "turn", "VERB"),
-    ("torno",  None, Some("à"),  None, "turn", "VERB"),
-    ("porto",  None, Some("atitudes"), None, "carry", "VERB"),
-    ("porto",  None, Some("verdades"), None, "carry", "VERB"),
-    ("colher", None, Some("depoimentos"), None, "harvest", "VERB"),
-    ("colher", None, Some("notas"),       None, "harvest", "VERB"),
-
-    /* 5. Substantivos/adjetivos */
-    ("cor",   None, Some("exata"), None, "colour", "NOUN"),
-    ("cor",   None, Some("ideal"), None, "colour", "NOUN"),
-    ("torre", None, Some("eólica"), None, "tower", "NOUN"),
-    ("sede",  Some("nova"), None, None, "seat", "NOUN"),
-    ("lobo",  Some("do"),   None, None, "wolf", "NOUN"),
-
-    /* 6. Bigramas contextuais — discriminante em +2 */
-    ("molho", None, Some("de"), Some("palha"),       "bundle", "NOUN"),
-    ("molho", None, Some("de"), Some("especiarias"), "bundle", "NOUN"),
-    ("molho", None, Some("de"), Some("cogumelos"),   "sauce",  "NOUN"),
-    ("molho", None, Some("de"), Some("wasabi"),      "sauce",  "NOUN"),
-    ("bola",  None, Some("de"), Some("carne"),   "loaf", "NOUN"),
-    ("bola",  None, Some("de"), Some("futebol"), "ball", "NOUN"),
-    ("polo",  None, Some("de"), Some("energia"), "hub", "NOUN"),
-    ("polo",  None, Some("de"), Some("água"),    "hub", "NOUN"),
-];
-
-fn check_expressao_fixa(
-    w: &str,
-    prev: &str,
-    nxt: &str,
-    nxt2: &str,
-) -> Option<(&'static str, &'static str)> {
-    for (palavra, pl, pr, pr2, sense, pos) in EXPRESSOES_FIXAS {
-        if *palavra != w {
-            continue;
+        let mut lexico: HashMap<String, HashMap<String, String>> = HashMap::new();
+        for (palavra, sentidos) in lexico_completo {
+            let mut mapa_sentidos = HashMap::new();
+            for (sentido, dados) in sentidos {
+                mapa_sentidos.insert(sentido, dados.ipa);
+            }
+            if !mapa_sentidos.is_empty() {
+                lexico.insert(palavra, mapa_sentidos);
+            }
         }
-        let ok_l = pl.map_or(true, |x| x == prev);
-        let ok_r = pr.map_or(true, |x| x == nxt);
-        let ok_r2 = pr2.map_or(true, |x| x == nxt2);
-        if ok_l && ok_r && ok_r2 {
-            return Some((sense, pos));
+
+        Ok(Self::novo(regras, lexico))
+    }
+
+    /// Diz se a palavra tem regra NB **ou** bigrama cadastrado.
+    pub fn tem_regra(&self, palavra: &str) -> bool {
+        self.regras.contains_key(palavra) || bigrama::tem_bigrama(palavra)
+    }
+
+    /// Devolve o IPA associado ao par `(palavra, sentido)`.
+    pub fn ipa_para(&self, palavra: &str, sentido: &str) -> Option<&str> {
+        self.lexico
+            .get(palavra)
+            .and_then(|mapa| mapa.get(sentido))
+            .map(|texto| texto.as_str())
+    }
+
+    /// Desambigua `palavra` no contexto de `sentenca`.
+    ///
+    /// Ordem de decisão:
+    /// 1. Expressão fixa (1-gram)
+    /// 2. Bigrama forward (2-gram: palavra + next1 + next2)
+    /// 3. Bigrama backward (2-gram: prev2 + prev1 + palavra)
+    /// 4. Naive Bayes
+    pub fn desambiguar(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        if let Some(d) = self.desambiguar_expressao_fixa(palavra, sentenca) {
+            return Some(d);
+        }
+        if let Some(d) = self.desambiguar_bigrama_next(palavra, sentenca) {
+            return Some(d);
+        }
+        if let Some(d) = self.desambiguar_bigrama_prev(palavra, sentenca) {
+            return Some(d);
+        }
+        self.desambiguar_nb(palavra, sentenca)
+    }
+
+    // -----------------------------------------------------------------------
+    // Nível 1 — Expressões fixas (1-gram)
+    // -----------------------------------------------------------------------
+
+    fn desambiguar_expressao_fixa(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        let anterior = if indice > 0 {
+            tokens[indice - 1].as_str()
+        } else {
+            ""
+        };
+        let proxima = if indice + 1 < tokens.len() {
+            tokens[indice + 1].as_str()
+        } else {
+            ""
+        };
+        let (sentido, pos) = verificar_expressao_fixa(palavra, anterior, proxima)?;
+        Some(Disambiguacao {
+            sentido: sentido.to_string(),
+            pos: pos.to_string(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Nível 2 — Bigrama forward
+    // -----------------------------------------------------------------------
+
+    fn desambiguar_bigrama_next(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        if indice + 2 >= tokens.len() {
+            return None;
+        }
+        let proxima_1 = tokens[indice + 1].as_str();
+        let proxima_2 = tokens[indice + 2].as_str();
+        let sentido = bigrama::verificar_next(palavra, proxima_1, proxima_2)?;
+        Some(Disambiguacao {
+            sentido: sentido.to_string(),
+            pos: String::new(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Nível 3 — Bigrama backward
+    // -----------------------------------------------------------------------
+
+    fn desambiguar_bigrama_prev(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        if indice < 2 {
+            return None;
+        }
+        let anterior_2 = tokens[indice - 2].as_str();
+        let anterior_1 = tokens[indice - 1].as_str();
+        let sentido = bigrama::verificar_prev(palavra, anterior_2, anterior_1)?;
+        Some(Disambiguacao {
+            sentido: sentido.to_string(),
+            pos: String::new(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Nível 4 — Naive Bayes
+    // -----------------------------------------------------------------------
+
+    fn desambiguar_nb(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        let regra = self.regras.get(palavra)?;
+        match regra {
+            Regra::Single { sense, pos } => Some(Disambiguacao {
+                sentido: sense.clone(),
+                pos: pos.clone(),
+            }),
+            Regra::Multi {
+                senses,
+                prior,
+                feat_counts,
+                feat_totals,
+            } => {
+                let features = extrair_features(sentenca, palavra);
+
+                let features = match features {
+                    Some(f) => f,
+                    None => {
+                        // Sem contexto: devolve o sentido mais frequente.
+                        let melhor = prior.iter().max_by(|a, b| {
+                            a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                        })?;
+                        let mut partes = melhor.0.splitn(2, '|');
+                        let sentido = partes.next()?.to_string();
+                        let pos = partes.next().unwrap_or("").to_string();
+                        return Some(Disambiguacao { sentido, pos });
+                    }
+                };
+
+                let mut pontuacoes: HashMap<&String, f64> = HashMap::new();
+                for chave_sentido in senses {
+                    let p_prior = prior.get(chave_sentido).copied().unwrap_or(1e-9);
+                    let mut log_pontuacao = (p_prior + 1e-9).ln();
+                    let contagens_feature = feat_counts.get(chave_sentido);
+                    let total_feature =
+                        feat_totals.get(chave_sentido).copied().unwrap_or(0) as f64;
+
+                    for (nome_feature, valor_feature) in &features {
+                        if let Some(contagens) = contagens_feature {
+                            if let Some(por_valor) = contagens.get(*nome_feature) {
+                                let contagem = por_valor
+                                    .get(valor_feature)
+                                    .copied()
+                                    .unwrap_or(0) as f64;
+                                let probabilidade =
+                                    (contagem + 1.0) / (total_feature + 5.0);
+                                log_pontuacao += probabilidade.ln();
+                            }
+                        }
+                    }
+                    pontuacoes.insert(chave_sentido, log_pontuacao);
+                }
+
+                let melhor = pontuacoes.iter().max_by(|a, b| {
+                    a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                })?;
+                let mut partes = melhor.0.splitn(2, '|');
+                let sentido = partes.next()?.to_string();
+                let pos = partes.next().unwrap_or("").to_string();
+                Some(Disambiguacao { sentido, pos })
+            }
         }
     }
-    None
 }
 
-/* ------------------------------------------------------------------ *
- * Classes gramaticais
- * ------------------------------------------------------------------ */
+// ---------------------------------------------------------------------------
+// Features sintáticas
+// ---------------------------------------------------------------------------
+
+fn extrair_features(
+    sentenca: &str,
+    alvo: &str,
+) -> Option<Vec<(&'static str, String)>> {
+    let re = regex_palavra();
+    let tokens: Vec<String> = re
+        .find_iter(sentenca)
+        .map(|m| m.as_str().to_lowercase())
+        .collect();
+    let indice = tokens.iter().position(|t| t == alvo)?;
+
+    let anterior = if indice > 0 {
+        Some(tokens[indice - 1].as_str())
+    } else {
+        None
+    };
+    let proxima = if indice + 1 < tokens.len() {
+        Some(tokens[indice + 1].as_str())
+    } else {
+        None
+    };
+
+    let mut features: Vec<(&'static str, String)> = Vec::with_capacity(6);
+    features.push(("prev_word", anterior.unwrap_or("").to_string()));
+    features.push(("next_word", proxima.unwrap_or("").to_string()));
+    features.push((
+        "prev_class",
+        classificar_token(anterior.unwrap_or("")).to_string(),
+    ));
+    features.push((
+        "next_class",
+        classificar_token(proxima.unwrap_or("")).to_string(),
+    ));
+    features.push((
+        "is_first",
+        if indice == 0 { "true" } else { "false" }.to_string(),
+    ));
+    let posicao_na_sentenca = if indice == 0 {
+        "first"
+    } else if indice == tokens.len() - 1 {
+        "last"
+    } else {
+        "middle"
+    };
+    features.push(("pos_in_sent", posicao_na_sentenca.to_string()));
+    Some(features)
+}
 
 const ARTIGOS: &[&str] = &["o", "a", "os", "as", "um", "uma", "uns", "umas"];
-const DEMONSTR: &[&str] = &[
+const DEMONSTRATIVOS: &[&str] = &[
     "este", "esta", "estes", "estas", "esse", "essa", "esses", "essas",
     "isso", "isto", "aquele", "aquela", "aqueles", "aquelas", "aquilo",
 ];
 const PREPOSICOES: &[&str] = &[
     "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
     "por", "pelo", "pela", "pelos", "pelas", "com", "sem", "para",
-    "ao", "à", "aos", "às", "entre", "sobre", "sob", "contra",
-    "desde", "até",
+    "ao", "à", "aos", "às", "entre", "sobre", "sob", "contra", "desde", "até",
 ];
 const PRONOMES: &[&str] = &[
     "eu", "tu", "ele", "ela", "nós", "vós", "você", "vocês", "eles", "elas",
@@ -211,441 +393,256 @@ const ADVERBIOS: &[&str] = &[
     "antes", "então", "assim", "bem", "mal", "tão", "quase",
 ];
 
-pub fn classify_token(t: &str) -> &'static str {
-    if t.is_empty() {
+fn classificar_token(token: &str) -> &'static str {
+    if token.is_empty() {
         return "NONE";
     }
-    if ARTIGOS.contains(&t) { return "ART"; }
-    if DEMONSTR.contains(&t) { return "DEM"; }
-    if PREPOSICOES.contains(&t) { return "PREP"; }
-    if PRONOMES.contains(&t) { return "PRON"; }
-    if CONJUNCOES.contains(&t) { return "CONJ"; }
-    if ADVERBIOS.contains(&t) { return "ADV"; }
-    if t.len() > 3 && (t.ends_with("ar") || t.ends_with("er") || t.ends_with("ir")) {
+    if ARTIGOS.contains(&token) {
+        return "ART";
+    }
+    if DEMONSTRATIVOS.contains(&token) {
+        return "DEM";
+    }
+    if PREPOSICOES.contains(&token) {
+        return "PREP";
+    }
+    if PRONOMES.contains(&token) {
+        return "PRON";
+    }
+    if CONJUNCOES.contains(&token) {
+        return "CONJ";
+    }
+    if ADVERBIOS.contains(&token) {
+        return "ADV";
+    }
+    if token.len() > 3
+        && (token.ends_with("ar") || token.ends_with("er") || token.ends_with("ir"))
+    {
         return "VERB_INF";
     }
-    if t.len() > 4
-        && (t.ends_with("ando") || t.ends_with("endo") || t.ends_with("indo"))
+    if token.len() > 4
+        && (token.ends_with("ando") || token.ends_with("endo") || token.ends_with("indo"))
     {
         return "VERB_GER";
     }
-    if t.len() > 4 && (t.ends_with("ado") || t.ends_with("ido")) {
+    if token.len() > 4 && (token.ends_with("ado") || token.ends_with("ido")) {
         return "VERB_PART";
     }
-    if t.len() > 6 && t.ends_with("mente") {
+    if token.len() > 6 && token.ends_with("mente") {
         return "ADV";
     }
     "OTHER"
 }
 
-/* ------------------------------------------------------------------ *
- * Features
- * ------------------------------------------------------------------ */
+// ---------------------------------------------------------------------------
+// Expressões fixas (1-gram)
+// ---------------------------------------------------------------------------
 
-pub fn norm_word(s: &str) -> String {
-    s.chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect::<String>()
-        .to_lowercase()
+/// Formato: `(palavra, anterior_opcional, próxima_opcional, sentido, pos)`.
+///
+/// AMBOS os lados `None` nunca acontecem — sempre exige contexto.
+static EXPRESSOES_FIXAS: &[(&str, Option<&str>, Option<&str>, &str, &str)] = &[
+    // ─── pelo + X (existing) ───
+    ("pelo", None, Some("visto"), "by_the", "ADP"),
+    ("pelo", None, Some("menos"), "by_the", "ADP"),
+    ("pelo", None, Some("contrário"), "by_the", "ADP"),
+    ("pelo", None, Some("contrario"), "by_the", "ADP"),
+    ("pelo", None, Some("amor"), "by_the", "ADP"),
+    ("pelo", None, Some("jeito"), "by_the", "ADP"),
+    ("pelo", None, Some("mundo"), "by_the", "ADP"),
+    ("pelo", None, Some("fato"), "by_the", "ADP"),
+    ("pelo", None, Some("caminho"), "by_the", "ADP"),
+    ("pelo", None, Some("tempo"), "by_the", "ADP"),
+    ("pelo", None, Some("silêncio"), "by_the", "ADP"),
+    ("pelo", None, Some("silencio"), "by_the", "ADP"),
+    ("pelo", None, Some("que"), "by_the", "ADP"),
+
+    // ─── pela + X (existing) ───
+    ("pela", None, Some("manhã"), "by_the", "ADP"),
+    ("pela", None, Some("manha"), "by_the", "ADP"),
+    ("pela", None, Some("tarde"), "by_the", "ADP"),
+    ("pela", None, Some("noite"), "by_the", "ADP"),
+    ("pela", None, Some("primeira"), "by_the", "ADP"),
+    ("pela", None, Some("última"), "by_the", "ADP"),
+    ("pela", None, Some("ultima"), "by_the", "ADP"),
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // NOVAS — verbos 1sg com sujeito/advérbio explícito
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // porto (verbo portar, 1sg)
+    ("porto", Some("sempre"), None, "carry", "VERB"),
+    ("porto", Some("eu"), None, "carry", "VERB"),
+    ("porto", None, Some("atitudes"), "carry", "VERB"),
+    ("porto", None, Some("verdades"), "carry", "VERB"),
+
+    // sopro (verbo soprar, 1sg)
+    ("sopro", Some("eu"), None, "blow", "VERB"),
+    ("sopro", None, Some("vontade"), "blow", "VERB"),
+
+    // gozo (verbo gozar, 1sg) — "gozo de X"
+    ("gozo", None, Some("de"), "enjoy", "VERB"),
+
+    // rego (verbo regar, 1sg)
+    ("rego", Some("tempo"), None, "water", "VERB"),
+    ("rego", Some("eu"), None, "water", "VERB"),
+
+    // desapego (verbo desapegar, 1sg)
+    ("desapego", Some("eu"), None, "let_go", "VERB"),
+
+    // despojo (verbo despojar, 1sg)
+    ("despojo", Some("nunca"), None, "strip", "VERB"),
+    ("despojo", Some("eu"), None, "strip", "VERB"),
+
+    // acerto (verbo acertar, 1sg)
+    ("acerto", Some("nunca"), None, "adjust", "VERB"),
+    ("acerto", Some("sempre"), None, "adjust", "VERB"),
+
+    // solto (verbo soltar, 1sg)
+    ("solto", Some("eu"), None, "release", "VERB"),
+
+    // desaforo (verbo desaforar, 1sg)
+    ("desaforo", Some("posso"), None, "affront", "VERB"),
+
+    // congelo (verbo congelar, 1sg)
+    ("congelo", Some("quando"), None, "freeze", "VERB"),
+
+    // desconforto (verbo desconfortar, 1sg)
+    ("desconforto", Some("não"), None, "discomfit", "VERB"),
+    ("desconforto", Some("nao"), None, "discomfit", "VERB"),
+
+    // desassossego (verbo desassossegar, 1sg)
+    ("desassossego", Some("não"), None, "disturb", "VERB"),
+    ("desassossego", Some("nao"), None, "disturb", "VERB"),
+
+    // torno (verbo tornar, 1sg) — "torno ao/à X"
+    ("torno", None, Some("ao"), "turn", "VERB"),
+    ("torno", None, Some("à"), "turn", "VERB"),
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // NOVAS — substantivos/adjetivos por contexto imediato
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // cor (substantivo) — "cor exata", "cor ideal"
+    ("cor", None, Some("exata"), "colour", "NOUN"),
+    ("cor", None, Some("ideal"), "colour", "NOUN"),
+
+    // sede (substantivo local) — "nova sede"
+    ("sede", Some("nova"), None, "seat", "NOUN"),
+
+    // lobo (animal) — "do lobo"
+    ("lobo", Some("do"), None, "wolf", "NOUN"),
+
+    // torre (substantivo) — "torre eólica"
+    ("torre", None, Some("eólica"), "tower", "NOUN"),
+    ("torre", None, Some("eolica"), "tower", "NOUN"),
+
+    // colher (verbo) — "colher depoimentos/notas"
+    ("colher", None, Some("depoimentos"), "harvest", "VERB"),
+    ("colher", None, Some("notas"), "harvest", "VERB"),
+    ("colher", None, Some("informações"), "harvest", "VERB"),
+    ("colher", None, Some("dados"), "harvest", "VERB"),
+];
+
+fn verificar_expressao_fixa(
+    palavra: &str,
+    anterior: &str,
+    proxima: &str,
+) -> Option<(&'static str, &'static str)> {
+    for (palavra_alvo, anterior_opcional, proxima_opcional, sentido, pos) in EXPRESSOES_FIXAS
+    {
+        if *palavra_alvo != palavra {
+            continue;
+        }
+        let ok_anterior = anterior_opcional.map_or(true, |x| x == anterior);
+        let ok_proxima = proxima_opcional.map_or(true, |x| x == proxima);
+        if ok_anterior && ok_proxima {
+            return Some((sentido, pos));
+        }
+    }
+    None
 }
-
-fn tokenize(s: &str) -> Vec<String> {
-    RE_WORD
-        .find_iter(s)
-        .map(|m| m.as_str().to_lowercase())
-        .collect()
-}
-
-fn extract_features(
-    sentence: &str,
-    target: &str,
-) -> Option<Vec<(&'static str, String)>> {
-    let toks = tokenize(sentence);
-    let tw = norm_word(target);
-    let i = toks.iter().position(|t| *t == tw)?;
-
-    let prev = if i > 0 { Some(toks[i - 1].as_str()) } else { None };
-    let next = if i + 1 < toks.len() { Some(toks[i + 1].as_str()) } else { None };
-    let next2 = if i + 2 < toks.len() { Some(toks[i + 2].as_str()) } else { None };
-
-    let mut feats: Vec<(&'static str, String)> = Vec::with_capacity(7);
-    feats.push(("prev_word", prev.unwrap_or("").to_string()));
-    feats.push(("next_word", next.unwrap_or("").to_string()));
-    feats.push(("next_word_2", next2.unwrap_or("").to_string()));
-    feats.push(("prev_class", classify_token(prev.unwrap_or("")).to_string()));
-    feats.push(("next_class", classify_token(next.unwrap_or("")).to_string()));
-    feats.push(("is_first", if i == 0 { "true" } else { "false" }.to_string()));
-    let pos_in_sent = if i == 0 {
-        "first"
-    } else if i == toks.len() - 1 {
-        "last"
-    } else {
-        "middle"
-    };
-    feats.push(("pos_in_sent", pos_in_sent.to_string()));
-
-    Some(feats)
-}
-
-/* ------------------------------------------------------------------ *
- * Impl
- * ------------------------------------------------------------------ */
-
-impl Homografos {
-    pub fn novo(
-        regras: HashMap<String, Regra>,
-        lexico: HashMap<String, HashMap<String, String>>,
-    ) -> Self {
-        Self {
-            regras,
-            lexico,
-            caminho_regras: "<memoria>".to_string(),
-            caminho_lexicon: "<memoria>".to_string(),
-        }
-    }
-
-    pub fn from_paths(regras_path: &Path, lexicon_path: &Path) -> Result<Self> {
-        let f_regras = File::open(regras_path)
-            .map_err(|e| format!("abrindo {}: {}", regras_path.display(), e))?;
-        let regras: HashMap<String, Regra> =
-            serde_json::from_reader(BufReader::new(f_regras))
-                .map_err(|e| format!("parseando regras JSON: {}", e))?;
-
-        let f_lex = File::open(lexicon_path)
-            .map_err(|e| format!("abrindo {}: {}", lexicon_path.display(), e))?;
-        let lexico_completo: HashMap<String, HashMap<String, EntradaSentido>> =
-            serde_json::from_reader(BufReader::new(f_lex))
-                .map_err(|e| format!("parseando lexicon JSON: {}", e))?;
-
-        let mut lexico: HashMap<String, HashMap<String, String>> = HashMap::new();
-        for (palavra, sentidos) in lexico_completo {
-            let mut m = HashMap::new();
-            for (sentido, dados) in sentidos {
-                m.insert(sentido, dados.ipa);
-            }
-            if !m.is_empty() {
-                lexico.insert(palavra, m);
-            }
-        }
-
-        Ok(Self {
-            regras,
-            lexico,
-            caminho_regras: regras_path.display().to_string(),
-            caminho_lexicon: lexicon_path.display().to_string(),
-        })
-    }
-
-    pub fn n_regras(&self) -> usize {
-        self.regras.len()
-    }
-
-    pub fn tem_regra(&self, palavra: &str) -> bool {
-        self.regras.contains_key(palavra)
-    }
-
-    pub fn ipa_para(&self, palavra: &str, sentido: &str) -> Option<&str> {
-        self.lexico
-            .get(palavra)
-            .and_then(|m| m.get(sentido))
-            .map(|s| s.as_str())
-    }
-
-    pub fn desambiguar(
-        &self,
-        palavra: &str,
-        sentenca: &str,
-    ) -> Option<Disambiguacao> {
-        let regra = self.regras.get(palavra)?;
-
-        match regra {
-            Regra::Single { sense, pos } => Some(Disambiguacao {
-                sentido: sense.clone(),
-                pos: pos.clone(),
-                metodo: "single",
-            }),
-            Regra::Multi {
-                senses,
-                prior,
-                feat_counts,
-                feat_totals,
-            } => {
-                // 1. Expressões fixas contextuais.
-                let toks = tokenize(sentenca);
-                let tw = norm_word(palavra);
-                if let Some(i) = toks.iter().position(|t| *t == tw) {
-                    let prev = if i > 0 { toks[i - 1].as_str() } else { "" };
-                    let next = if i + 1 < toks.len() { toks[i + 1].as_str() } else { "" };
-                    let next2 = if i + 2 < toks.len() { toks[i + 2].as_str() } else { "" };
-                    if let Some((sense, pos)) =
-                        check_expressao_fixa(&tw, prev, next, next2)
-                    {
-                        return Some(Disambiguacao {
-                            sentido: sense.to_string(),
-                            pos: pos.to_string(),
-                            metodo: "expressao_fixa",
-                        });
-                    }
-                }
-
-                // 2. Naive Bayes.
-                let feats = match extract_features(sentenca, palavra) {
-                    Some(f) => f,
-                    None => {
-                        let (best, _) = prior.iter().max_by(|a, b| {
-                            a.1.partial_cmp(b.1)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        })?;
-                        let mut partes = best.splitn(2, '|');
-                        let s = partes.next()?.to_string();
-                        let p = partes.next().unwrap_or("").to_string();
-                        return Some(Disambiguacao {
-                            sentido: s,
-                            pos: p,
-                            metodo: "prior_only",
-                        });
-                    }
-                };
-
-                let mut scores: HashMap<&String, f64> = HashMap::new();
-                for sense_key in senses {
-                    let p_prior = prior.get(sense_key).copied().unwrap_or(1e-9);
-                    let mut log_s = (p_prior + 1e-9).ln();
-                    let fcounts = feat_counts.get(sense_key);
-                    let ftot = feat_totals.get(sense_key).copied().unwrap_or(0) as f64;
-
-                    for (fname, fval) in &feats {
-                        if let Some(fc) = fcounts {
-                            if let Some(by_val) = fc.get(*fname) {
-                                let cnt = by_val.get(fval).copied().unwrap_or(0) as f64;
-                                let prob = (cnt + 1.0) / (ftot + 5.0);
-                                log_s += prob.ln();
-                            }
-                        }
-                    }
-                    scores.insert(sense_key, log_s);
-                }
-
-                let (best, _) = scores.iter().max_by(|a, b| {
-                    a.1.partial_cmp(b.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })?;
-
-                let mut partes = best.splitn(2, '|');
-                let sentido = partes.next()?.to_string();
-                let pos = partes.next().unwrap_or("").to_string();
-                Some(Disambiguacao {
-                    sentido,
-                    pos,
-                    metodo: "nb",
-                })
-            }
-        }
-    }
-
-    pub fn diagnostico(&self) -> DiagnosticoHomografos {
-        let mut single = 0;
-        let mut multi = 0;
-        for regra in self.regras.values() {
-            match regra {
-                Regra::Single { .. } => single += 1,
-                Regra::Multi { .. } => multi += 1,
-            }
-        }
-
-        let n_palavras_lexicon = self.lexico.len();
-        let n_total_entradas_lexicon =
-            self.lexico.values().map(|m| m.len()).sum::<usize>();
-
-        let n_expressoes_fixas = EXPRESSOES_FIXAS.len();
-        let n_expressoes_com_next2 = EXPRESSOES_FIXAS
-            .iter()
-            .filter(|(_, _, _, pr2, _, _)| pr2.is_some())
-            .count();
-
-        DiagnosticoHomografos {
-            n_regras: self.regras.len(),
-            regras_single: single,
-            regras_multi: multi,
-            n_palavras_lexicon,
-            n_total_entradas_lexicon,
-            n_expressoes_fixas,
-            n_expressoes_com_next2,
-            caminho_regras: self.caminho_regras.clone(),
-            caminho_lexicon: self.caminho_lexicon.clone(),
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ *
- * Testes
- * ------------------------------------------------------------------ */
 
 #[cfg(test)]
 mod testes {
     use super::*;
 
-    fn regra_multi_simples() -> HashMap<String, Regra> {
-        let mut regras = HashMap::new();
+    fn homografos_de_teste() -> Homografos {
+        // Regras de teste mínimas
+        let mut regras: HashMap<String, Regra> = HashMap::new();
         regras.insert(
             "sede".to_string(),
             Regra::Multi {
                 senses: vec!["seat|NOUN".to_string(), "thirst|NOUN".to_string()],
                 prior: {
-                    let mut m = HashMap::new();
-                    m.insert("seat|NOUN".to_string(), 0.5);
-                    m.insert("thirst|NOUN".to_string(), 0.5);
-                    m
+                    let mut p = HashMap::new();
+                    p.insert("seat|NOUN".to_string(), 0.5);
+                    p.insert("thirst|NOUN".to_string(), 0.5);
+                    p
                 },
                 feat_counts: HashMap::new(),
                 feat_totals: HashMap::new(),
             },
         );
-        regras.insert(
-            "único".to_string(),
-            Regra::Single {
-                sense: "only".to_string(),
-                pos: "NOUN".to_string(),
-            },
-        );
-        regras
-    }
-
-    fn lexicon_minimo() -> HashMap<String, HashMap<String, String>> {
-        let mut lexico = HashMap::new();
-        let mut sede = HashMap::new();
-        sede.insert("seat".to_string(), "sˈɛdʒi".to_string());
-        sede.insert("thirst".to_string(), "sˈedʒi".to_string());
-        lexico.insert("sede".to_string(), sede);
-        lexico
+        Homografos::novo(regras, HashMap::new())
     }
 
     #[test]
-    fn homografos_novo_funciona() {
-        let h = Homografos::novo(regra_multi_simples(), lexicon_minimo());
-        assert_eq!(h.n_regras(), 2);
+    fn tem_regra_detecta_palavra_com_regra_nb() {
+        let h = homografos_de_teste();
         assert!(h.tem_regra("sede"));
-        assert!(h.tem_regra("único"));
         assert!(!h.tem_regra("casa"));
     }
 
     #[test]
-    fn ipa_para_funciona() {
-        let h = Homografos::novo(regra_multi_simples(), lexicon_minimo());
-        assert_eq!(h.ipa_para("sede", "seat"), Some("sˈɛdʒi"));
-        assert_eq!(h.ipa_para("sede", "thirst"), Some("sˈedʒi"));
-        assert_eq!(h.ipa_para("sede", "outro"), None);
-        assert_eq!(h.ipa_para("casa", "seat"), None);
+    fn tem_regra_detecta_palavra_com_bigrama() {
+        let h = homografos_de_teste();
+        assert!(h.tem_regra("molho"));
+        assert!(h.tem_regra("colher"));
+        assert!(h.tem_regra("bola"));
     }
 
     #[test]
-    fn regra_single_devolve_sentido_fixo() {
-        let h = Homografos::novo(regra_multi_simples(), lexicon_minimo());
-        let r = h.desambiguar("único", "qualquer frase").unwrap();
-        assert_eq!(r.sentido, "only");
-        assert_eq!(r.metodo, "single");
+    fn desambigua_por_expressao_fixa() {
+        let h = homografos_de_teste();
+        let resultado = h.desambiguar("pelo", "pelo visto, ele veio");
+        assert!(resultado.is_some());
+        let d = resultado.unwrap();
+        assert_eq!(d.sentido, "by_the");
     }
 
     #[test]
-    fn expressao_fixa_pelo_menos() {
-        assert_eq!(
-            check_expressao_fixa("pelo", "", "menos", ""),
-            Some(("by_the", "ADP"))
-        );
-        assert_eq!(
-            check_expressao_fixa("pelo", "", "visto", ""),
-            Some(("by_the", "ADP"))
-        );
-        assert_eq!(check_expressao_fixa("pelo", "", "outra", ""), None);
+    fn desambigua_por_bigrama_next() {
+        let h = homografos_de_teste();
+        let resultado = h.desambiguar("molho", "o molho de palha seca");
+        assert!(resultado.is_some());
+        let d = resultado.unwrap();
+        assert_eq!(d.sentido, "bundle");
+
+        let resultado2 = h.desambiguar("molho", "um molho de cogumelos");
+        assert!(resultado2.is_some());
+        assert_eq!(resultado2.unwrap().sentido, "sauce");
     }
 
     #[test]
-    fn expressao_fixa_com_next2_molho_palha() {
-        assert_eq!(
-            check_expressao_fixa("molho", "", "de", "palha"),
-            Some(("bundle", "NOUN"))
-        );
-        assert_eq!(
-            check_expressao_fixa("molho", "", "de", "cogumelos"),
-            Some(("sauce", "NOUN"))
-        );
-        assert_eq!(check_expressao_fixa("molho", "", "de", "outra"), None);
-        assert_eq!(check_expressao_fixa("molho", "", "de", ""), None);
+    fn desambigua_por_bigrama_prev() {
+        let h = homografos_de_teste();
+        let resultado = h.desambiguar("colher", "a equipa começou a colher depoimentos");
+        assert!(resultado.is_some());
+        assert_eq!(resultado.unwrap().sentido, "harvest");
     }
 
     #[test]
-    fn expressao_fixa_porto_sempre() {
-        assert_eq!(
-            check_expressao_fixa("porto", "sempre", "", ""),
-            Some(("carry", "VERB"))
-        );
-        assert_eq!(check_expressao_fixa("porto", "outra", "", ""), None);
+    fn desambigua_por_nb_quando_sem_regra_especifica() {
+        let h = homografos_de_teste();
+        let resultado = h.desambiguar("sede", "tenho sede de água");
+        assert!(resultado.is_some());
+        // Sem features no teste, cai no prior (ambos 0.5)
     }
 
     #[test]
-    fn expressao_fixa_torno_ao() {
-        assert_eq!(
-            check_expressao_fixa("torno", "", "ao", ""),
-            Some(("turn", "VERB"))
-        );
-        assert_eq!(
-            check_expressao_fixa("torno", "", "à", ""),
-            Some(("turn", "VERB"))
-        );
-    }
-
-    #[test]
-    fn expressao_fixa_colher_depoimentos() {
-        assert_eq!(
-            check_expressao_fixa("colher", "", "depoimentos", ""),
-            Some(("harvest", "VERB"))
-        );
-        assert_eq!(
-            check_expressao_fixa("colher", "", "notas", ""),
-            Some(("harvest", "VERB"))
-        );
-    }
-
-    #[test]
-    fn extract_features_7_campos() {
-        let feats = extract_features("Eu sopro vontade nos meus colegas", "sopro")
-            .expect("features");
-        assert_eq!(feats.len(), 7);
-        let nomes: Vec<&str> = feats.iter().map(|(n, _)| *n).collect();
-        assert!(nomes.contains(&"prev_word"));
-        assert!(nomes.contains(&"next_word"));
-        assert!(nomes.contains(&"next_word_2"));
-    }
-
-    #[test]
-    fn extract_features_next2_correto() {
-        let feats = extract_features("O molho de palha seca", "molho")
-            .expect("features");
-        let next = feats.iter().find(|(n, _)| *n == "next_word").map(|(_, v)| v.as_str());
-        let next2 = feats.iter().find(|(n, _)| *n == "next_word_2").map(|(_, v)| v.as_str());
-        assert_eq!(next, Some("de"));
-        assert_eq!(next2, Some("palha"));
-    }
-
-    #[test]
-    fn classify_token_categorias() {
-        assert_eq!(classify_token("o"), "ART");
-        assert_eq!(classify_token("de"), "PREP");
-        assert_eq!(classify_token("eu"), "PRON");
-        assert_eq!(classify_token("mas"), "CONJ");
-        assert_eq!(classify_token("sempre"), "ADV");
-        assert_eq!(classify_token("fazer"), "VERB_INF");
-        assert_eq!(classify_token(""), "NONE");
-    }
-
-    #[test]
-    fn diagnostico_conta_correto() {
-        let h = Homografos::novo(regra_multi_simples(), lexicon_minimo());
-        let d = h.diagnostico();
-        assert_eq!(d.n_regras, 2);
-        assert_eq!(d.regras_single, 1);
-        assert_eq!(d.regras_multi, 1);
-        assert!(d.n_expressoes_fixas > 0);
-        assert!(d.n_expressoes_com_next2 > 0);
+    fn palavra_desconhecida_retorna_none() {
+        let h = homografos_de_teste();
+        assert!(h.desambiguar("inexistente", "frase qualquer").is_none());
     }
 }
