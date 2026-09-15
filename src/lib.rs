@@ -10,6 +10,7 @@
 //! - `g2p`:       núcleo do conversor grafema→fonema.
 //! - `splitter`:  divisão de texto em sentenças.
 
+pub mod bigrama;
 pub mod g2p;
 pub mod homografos;
 pub mod lexicon_contexto;
@@ -17,6 +18,7 @@ pub mod lexicon_palavra;
 pub mod normalize;
 pub mod numbers;
 pub mod splitter;
+
 
 pub use g2p::{
     acentuar, fonemizar, phonemize, palavra_para_ipa, silabificar, OpcoesFonemizar,
