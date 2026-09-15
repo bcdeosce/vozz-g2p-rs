@@ -1,0 +1,1689 @@
+{
+  "adorno": {
+    "adorn": {
+      "ipa": "ˌadˈɔɾənʊ",
+      "confianca": 0.9866920152091255,
+      "ocorrencias": 526
+    },
+    "adornment": {
+      "ipa": "ˌadˈoɾənʊ",
+      "confianca": 0.9142857142857143,
+      "ocorrencias": 455
+    }
+  },
+  "azedo": {
+    "sour": {
+      "ipa": "ˌazˈedʊ",
+      "confianca": 0.8571428571428571,
+      "ocorrencias": 301
+    },
+    "turn_sour": {
+      "ipa": "ˌazˈɛdʊ",
+      "confianca": 0.9950980392156863,
+      "ocorrencias": 408
+    }
+  },
+  "cerro": {
+    "shut": {
+      "ipa": "sˈɛxʊ",
+      "confianca": 0.9970544918998527,
+      "ocorrencias": 679
+    },
+    "hill": {
+      "ipa": "sˈexʊ",
+      "confianca": 0.7043343653250774,
+      "ocorrencias": 646
+    }
+  },
+  "seco": {
+    "dry": {
+      "ipa": "sˈekʊ",
+      "confianca": 0.680379746835443,
+      "ocorrencias": 632
+    },
+    "dry_vb": {
+      "ipa": "sˈɛkʊ",
+      "confianca": 0.9744318181818182,
+      "ocorrencias": 704
+    }
+  },
+  "soma": {
+    "sum": {
+      "ipa": "sˈomæ",
+      "confianca": 1.0,
+      "ocorrencias": 58
+    },
+    "add": {
+      "ipa": "sˈɔmæ",
+      "confianca": 1.0,
+      "ocorrencias": 73
+    }
+  },
+  "aborto": {
+    "abortion": {
+      "ipa": "ˌabˈoɾətʊ",
+      "confianca": 0.7199124726477024,
+      "ocorrencias": 457
+    },
+    "abort": {
+      "ipa": "ˌabˈɔɾətʊ",
+      "confianca": 0.980561555075594,
+      "ocorrencias": 463
+    }
+  },
+  "enredo": {
+    "plot": {
+      "ipa": "ˌeɪŋxˈedʊ",
+      "confianca": 0.9191919191919192,
+      "ocorrencias": 396
+    },
+    "entangle": {
+      "ipa": "ˌeɪŋxˈɛdʊ",
+      "confianca": 0.918918918918919,
+      "ocorrencias": 296
+    }
+  },
+  "desaforo": {
+    "insolence": {
+      "ipa": "dˌezafˈoɾʊ",
+      "confianca": 0.8864541832669323,
+      "ocorrencias": 502
+    },
+    "affront": {
+      "ipa": "dˌezafˈɔɾʊ",
+      "confianca": 0.9920318725099602,
+      "ocorrencias": 502
+    }
+  },
+  "sossego": {
+    "calm": {
+      "ipa": "sˌosˈeɡʊ",
+      "confianca": 0.9081272084805654,
+      "ocorrencias": 283
+    },
+    "soothe": {
+      "ipa": "sˌosˈɛɡʊ",
+      "confianca": 0.9554655870445344,
+      "ocorrencias": 247
+    }
+  },
+  "molho": {
+    "sauce": {
+      "ipa": "mˈoljʊ",
+      "confianca": 0.868824531516184,
+      "ocorrencias": 587
+    },
+    "bundle": {
+      "ipa": "mˈɔljʊ",
+      "confianca": 1.0,
+      "ocorrencias": 195
+    },
+    "soaking": {
+      "ipa": "mˈoljʊ",
+      "confianca": 0.6666666666666666,
+      "ocorrencias": 39
+    }
+  },
+  "zelo": {
+    "zeal": {
+      "ipa": "zˈelʊ",
+      "confianca": 0.8652482269503546,
+      "ocorrencias": 423
+    },
+    "tend": {
+      "ipa": "zˈɛlʊ",
+      "confianca": 0.7584905660377359,
+      "ocorrencias": 265
+    }
+  },
+  "emperro": {
+    "jam": {
+      "ipa": "ˌeɪmpˈexʊ",
+      "confianca": 0.9349593495934959,
+      "ocorrencias": 246
+    },
+    "stick": {
+      "ipa": "ˌeɪmpˈɛxʊ",
+      "confianca": 0.6979591836734694,
+      "ocorrencias": 245
+    }
+  },
+  "transtorno": {
+    "disorder": {
+      "ipa": "trˌɐ̃ŋstˈoɾənʊ",
+      "confianca": 0.8650371944739639,
+      "ocorrencias": 941
+    },
+    "upset": {
+      "ipa": "trˌɐ̃ŋstˈɔɾənʊ",
+      "confianca": 0.9597855227882037,
+      "ocorrencias": 746
+    }
+  },
+  "desvelo": {
+    "unveil": {
+      "ipa": "dˌezvˈɛlʊ",
+      "confianca": 0.9527777777777777,
+      "ocorrencias": 360
+    },
+    "devotion": {
+      "ipa": "dˌezvˈelʊ",
+      "confianca": 0.9006024096385542,
+      "ocorrencias": 332
+    }
+  },
+  "soco": {
+    "strike": {
+      "ipa": "sˈɔkʊ",
+      "confianca": 0.9494047619047619,
+      "ocorrencias": 336
+    },
+    "punch": {
+      "ipa": "sˈokʊ",
+      "confianca": 0.9274809160305344,
+      "ocorrencias": 262
+    }
+  },
+  "sopro": {
+    "blow": {
+      "ipa": "sˈɔprʊ",
+      "confianca": 0.9071207430340558,
+      "ocorrencias": 323
+    },
+    "breath": {
+      "ipa": "sˈoprʊ",
+      "confianca": 0.9351851851851852,
+      "ocorrencias": 324
+    }
+  },
+  "desempeno": {
+    "straighten": {
+      "ipa": "dˌezeɪmpˈɛnʊ",
+      "confianca": 0.926605504587156,
+      "ocorrencias": 327
+    },
+    "straightening": {
+      "ipa": "dˌezeɪmpˈenʊ",
+      "confianca": 0.8604651162790697,
+      "ocorrencias": 387
+    }
+  },
+  "desespero": {
+    "despair": {
+      "ipa": "dˌezespˈeɾʊ",
+      "confianca": 0.827485380116959,
+      "ocorrencias": 342
+    },
+    "despair_at": {
+      "ipa": "dˌezespˈɛɾʊ",
+      "confianca": 0.5983379501385041,
+      "ocorrencias": 361
+    }
+  },
+  "desacordo": {
+    "disagreement": {
+      "ipa": "dˌezakˈoɾədʊ",
+      "confianca": 0.6975476839237057,
+      "ocorrencias": 367
+    },
+    "disagree": {
+      "ipa": "dˌezakˈɔɾədʊ",
+      "confianca": 0.8431372549019608,
+      "ocorrencias": 459
+    }
+  },
+  "selo": {
+    "stamp": {
+      "ipa": "sˈelʊ",
+      "confianca": 0.8192090395480226,
+      "ocorrencias": 177
+    },
+    "seal": {
+      "ipa": "sˈɛlʊ",
+      "confianca": 0.9725609756097561,
+      "ocorrencias": 328
+    },
+    "seal_mark": {
+      "ipa": "sˈelʊ",
+      "confianca": 0.8431372549019608,
+      "ocorrencias": 102
+    },
+    "hallmark": {
+      "ipa": "sˈelʊ",
+      "confianca": 0.875,
+      "ocorrencias": 8
+    },
+    "wax_seal": {
+      "ipa": "sˈelʊ",
+      "confianca": 0.972972972972973,
+      "ocorrencias": 37
+    }
+  },
+  "relevo": {
+    "emphasize": {
+      "ipa": "xˌelˈɛvʊ",
+      "confianca": 0.9824561403508771,
+      "ocorrencias": 342
+    },
+    "relief_terrain": {
+      "ipa": "xˌelˈevʊ",
+      "confianca": 0.8360128617363344,
+      "ocorrencias": 311
+    }
+  },
+  "pelo": {
+    "by_the": {
+      "ipa": "pˈelʊ",
+      "confianca": 0.8102941176470588,
+      "ocorrencias": 680
+    },
+    "peel": {
+      "ipa": "pˈɛlʊ",
+      "confianca": 0.9232558139534883,
+      "ocorrencias": 430
+    },
+    "hair": {
+      "ipa": "pˈelʊ",
+      "confianca": 0.919431279620853,
+      "ocorrencias": 422
+    }
+  },
+  "colher": {
+    "harvest": {
+      "ipa": "koljˈer",
+      "confianca": 0.5968436154949784,
+      "ocorrencias": 697
+    },
+    "spoon": {
+      "ipa": "koljˈɛr",
+      "confianca": 0.9425113464447806,
+      "ocorrencias": 661
+    }
+  },
+  "empeno": {
+    "warping": {
+      "ipa": "ˌeɪmpˈenʊ",
+      "confianca": 0.9251968503937008,
+      "ocorrencias": 254
+    },
+    "warp": {
+      "ipa": "ˌeɪmpˈɛnʊ",
+      "confianca": 0.9004329004329005,
+      "ocorrencias": 231
+    }
+  },
+  "acordo": {
+    "agreement": {
+      "ipa": "ˌakˈoɾədʊ",
+      "confianca": 0.8543307086614174,
+      "ocorrencias": 762
+    },
+    "wake": {
+      "ipa": "ˌakˈɔɾədʊ",
+      "confianca": 0.7770360480640854,
+      "ocorrencias": 749
+    }
+  },
+  "gozo": {
+    "enjoy": {
+      "ipa": "ɡˈɔzʊ",
+      "confianca": 0.9634703196347032,
+      "ocorrencias": 657
+    },
+    "enjoyment": {
+      "ipa": "ɡˈozʊ",
+      "confianca": 0.881203007518797,
+      "ocorrencias": 665
+    }
+  },
+  "desgosto": {
+    "dislike": {
+      "ipa": "dˌezɡˈɔstʊ",
+      "confianca": 0.9876543209876543,
+      "ocorrencias": 324
+    },
+    "sorrow": {
+      "ipa": "dˌezɡˈostʊ",
+      "confianca": 0.8453038674033149,
+      "ocorrencias": 362
+    }
+  },
+  "retorno": {
+    "return": {
+      "ipa": "xˌetˈoɾənʊ",
+      "confianca": 0.8084577114427861,
+      "ocorrencias": 402
+    },
+    "go_back": {
+      "ipa": "xˌetˈɔɾənʊ",
+      "confianca": 0.9563953488372093,
+      "ocorrencias": 344
+    }
+  },
+  "degelo": {
+    "thaw_out": {
+      "ipa": "dˌeʒˈɛlʊ",
+      "confianca": 0.9868073878627969,
+      "ocorrencias": 379
+    },
+    "thaw": {
+      "ipa": "dˌeʒˈelʊ",
+      "confianca": 0.84375,
+      "ocorrencias": 416
+    }
+  },
+  "jogo": {
+    "play": {
+      "ipa": "ʒˈɔɡʊ",
+      "confianca": 0.8819018404907976,
+      "ocorrencias": 652
+    },
+    "game": {
+      "ipa": "ʒˈoɡʊ",
+      "confianca": 0.9876760563380281,
+      "ocorrencias": 568
+    }
+  },
+  "rogo": {
+    "beg": {
+      "ipa": "xˈɔɡʊ",
+      "confianca": 0.6643598615916955,
+      "ocorrencias": 289
+    },
+    "plea": {
+      "ipa": "xˈoɡʊ",
+      "confianca": 0.873015873015873,
+      "ocorrencias": 378
+    }
+  },
+  "arrojo": {
+    "boldness": {
+      "ipa": "ˌaxˈoʒʊ",
+      "confianca": 0.8438818565400844,
+      "ocorrencias": 474
+    },
+    "hurl": {
+      "ipa": "ˌaxˈɔʒʊ",
+      "confianca": 0.9155555555555556,
+      "ocorrencias": 225
+    }
+  },
+  "esboço": {
+    "sketch": {
+      "ipa": "ˌezbˈosʊ",
+      "confianca": 0.8981723237597912,
+      "ocorrencias": 383
+    },
+    "outline": {
+      "ipa": "ˌezbˈɔsʊ",
+      "confianca": 0.9789473684210527,
+      "ocorrencias": 285
+    }
+  },
+  "toco": {
+    "play": {
+      "ipa": "tˈɔkʊ",
+      "confianca": 0.5718954248366013,
+      "ocorrencias": 306
+    },
+    "stump": {
+      "ipa": "tˈokʊ",
+      "confianca": 0.8853503184713376,
+      "ocorrencias": 314
+    }
+  },
+  "começo": {
+    "begin": {
+      "ipa": "kˌomˈɛsʊ",
+      "confianca": 0.9836512261580381,
+      "ocorrencias": 734
+    },
+    "beginning": {
+      "ipa": "kˌomˈesʊ",
+      "confianca": 0.9663608562691132,
+      "ocorrencias": 654
+    }
+  },
+  "reforço": {
+    "reinforce": {
+      "ipa": "xˌefˈɔɾəsʊ",
+      "confianca": 0.9964028776978417,
+      "ocorrencias": 278
+    },
+    "reinforcement": {
+      "ipa": "xˌefˈoɾəsʊ",
+      "confianca": 0.97,
+      "ocorrencias": 400
+    }
+  },
+  "desassossego": {
+    "disquiet": {
+      "ipa": "dˌezasosˈeɡʊ",
+      "confianca": 0.775623268698061,
+      "ocorrencias": 361
+    },
+    "disturb": {
+      "ipa": "dˌezasosˈɛɡʊ",
+      "confianca": 0.9033018867924528,
+      "ocorrencias": 424
+    }
+  },
+  "choro": {
+    "weeping": {
+      "ipa": "ʃˈoɾʊ",
+      "confianca": 0.860128617363344,
+      "ocorrencias": 622
+    },
+    "weep": {
+      "ipa": "ʃˈɔɾʊ",
+      "confianca": 0.7437325905292479,
+      "ocorrencias": 718
+    }
+  },
+  "sobre": {
+    "about": {
+      "ipa": "sˈobri",
+      "confianca": 0.7881136950904393,
+      "ocorrencias": 387
+    },
+    "leftover": {
+      "ipa": "sˈɔbry",
+      "confianca": 0.7532188841201717,
+      "ocorrencias": 466
+    },
+    "sail": {
+      "ipa": "sˈobry",
+      "confianca": 0.75,
+      "ocorrencias": 36
+    }
+  },
+  "dobro": {
+    "double": {
+      "ipa": "dˈobrʊ",
+      "confianca": 1.0,
+      "ocorrencias": 366
+    },
+    "fold": {
+      "ipa": "dˈɔbrʊ",
+      "confianca": 0.9967845659163987,
+      "ocorrencias": 311
+    }
+  },
+  "desenredo": {
+    "denouement": {
+      "ipa": "dˌezeɪŋxˈedʊ",
+      "confianca": 0.9155672823218998,
+      "ocorrencias": 379
+    },
+    "disentangle": {
+      "ipa": "dˌezeɪŋxˈɛdʊ",
+      "confianca": 0.9882075471698113,
+      "ocorrencias": 424
+    }
+  },
+  "para": {
+    "stop": {
+      "ipa": "pˈaɾæ",
+      "confianca": 0.9848901098901099,
+      "ocorrencias": 728
+    },
+    "purpose": {
+      "ipa": "pˌaɾæ",
+      "confianca": 1.0,
+      "ocorrencias": 727
+    }
+  },
+  "olho": {
+    "eye": {
+      "ipa": "ˈoljʊ",
+      "confianca": 0.8538961038961039,
+      "ocorrencias": 616
+    },
+    "look": {
+      "ipa": "ˈɔljʊ",
+      "confianca": 0.9303703703703704,
+      "ocorrencias": 675
+    }
+  },
+  "rola": {
+    "rolls": {
+      "ipa": "xˈɔlæ",
+      "confianca": 1.0,
+      "ocorrencias": 236
+    },
+    "turtledove": {
+      "ipa": "xˈolæ",
+      "confianca": 1.0,
+      "ocorrencias": 280
+    }
+  },
+  "porto": {
+    "carry": {
+      "ipa": "pˈɔɾətʊ",
+      "confianca": 0.9263157894736842,
+      "ocorrencias": 855
+    },
+    "harbour": {
+      "ipa": "pˈoɾətʊ",
+      "confianca": 0.6839237057220708,
+      "ocorrencias": 734
+    }
+  },
+  "apego": {
+    "attachment": {
+      "ipa": "ˌapˈeɡʊ",
+      "confianca": 0.6298076923076923,
+      "ocorrencias": 416
+    },
+    "cling": {
+      "ipa": "ˌapˈɛɡʊ",
+      "confianca": 0.995260663507109,
+      "ocorrencias": 211
+    }
+  },
+  "soldo": {
+    "pay": {
+      "ipa": "sˈoldʊ",
+      "confianca": 0.8731117824773413,
+      "ocorrencias": 331
+    },
+    "weld": {
+      "ipa": "sˈɔldʊ",
+      "confianca": 0.9691780821917808,
+      "ocorrencias": 292
+    }
+  },
+  "estofo": {
+    "upholster": {
+      "ipa": "ˌestˈɔfʊ",
+      "confianca": 0.8757225433526011,
+      "ocorrencias": 346
+    },
+    "stuffing": {
+      "ipa": "ˌestˈofʊ",
+      "confianca": 0.8354838709677419,
+      "ocorrencias": 310
+    },
+    "mettle": {
+      "ipa": "ˌestˈofʊ",
+      "confianca": 0.9,
+      "ocorrencias": 30
+    }
+  },
+  "repelo": {
+    "pluck": {
+      "ipa": "xˌepˈɛlʊ",
+      "confianca": 0.8646288209606987,
+      "ocorrencias": 229
+    },
+    "hair_pull": {
+      "ipa": "xˌepˈelʊ",
+      "confianca": 0.8292682926829268,
+      "ocorrencias": 205
+    }
+  },
+  "atropelo": {
+    "running_over": {
+      "ipa": "ˌatropˈɛlʊ",
+      "confianca": 0.8253012048192772,
+      "ocorrencias": 166
+    },
+    "run_over": {
+      "ipa": "ˌatropˈɛlʊ",
+      "confianca": 0.9684684684684685,
+      "ocorrencias": 444
+    },
+    "trampling": {
+      "ipa": "ˌatropˈelʊ",
+      "confianca": 0.7319884726224783,
+      "ocorrencias": 347
+    }
+  },
+  "desemperro": {
+    "unjam": {
+      "ipa": "dˌezeɪmpˈɛxʊ",
+      "confianca": 0.99375,
+      "ocorrencias": 320
+    },
+    "unjamming": {
+      "ipa": "dˌezeɪmpˈexʊ",
+      "confianca": 0.952513966480447,
+      "ocorrencias": 358
+    }
+  },
+  "rego": {
+    "water": {
+      "ipa": "xˈɛɡʊ",
+      "confianca": 0.9900990099009901,
+      "ocorrencias": 707
+    },
+    "furrow": {
+      "ipa": "xˈeɡʊ",
+      "confianca": 0.7024320457796852,
+      "ocorrencias": 699
+    }
+  },
+  "desprezo": {
+    "contempt": {
+      "ipa": "dˌesprˈezʊ",
+      "confianca": 0.8679775280898876,
+      "ocorrencias": 356
+    },
+    "despise": {
+      "ipa": "dˌesprˈɛzʊ",
+      "confianca": 0.8463203463203464,
+      "ocorrencias": 462
+    }
+  },
+  "sede": {
+    "seat": {
+      "ipa": "sˈɛdʒy",
+      "confianca": 0.9690189328743546,
+      "ocorrencias": 581
+    },
+    "thirst": {
+      "ipa": "sˈedʒy",
+      "confianca": 0.8263305322128851,
+      "ocorrencias": 357
+    }
+  },
+  "conserto": {
+    "repair": {
+      "ipa": "kˌoŋsˈeɾətʊ",
+      "confianca": 0.9694148936170213,
+      "ocorrencias": 752
+    },
+    "mend": {
+      "ipa": "kˌoŋsˈɛɾətʊ",
+      "confianca": 0.9572763684913218,
+      "ocorrencias": 749
+    }
+  },
+  "colmo": {
+    "culm": {
+      "ipa": "kˈolmʊ",
+      "confianca": 0.9413265306122449,
+      "ocorrencias": 392
+    },
+    "thatch": {
+      "ipa": "kˈɔlmʊ",
+      "confianca": 0.9724770642201835,
+      "ocorrencias": 436
+    }
+  },
+  "almoço": {
+    "lunch": {
+      "ipa": "ˌaʊmˈosʊ",
+      "confianca": 0.8909090909090909,
+      "ocorrencias": 385
+    },
+    "dine": {
+      "ipa": "ˌaʊmˈɔsʊ",
+      "confianca": 0.7224669603524229,
+      "ocorrencias": 227
+    }
+  },
+  "tempero": {
+    "season": {
+      "ipa": "tˌeɪmpˈɛɾʊ",
+      "confianca": 0.9856459330143541,
+      "ocorrencias": 418
+    },
+    "seasoning": {
+      "ipa": "tˌeɪmpˈeɾʊ",
+      "confianca": 0.8275862068965517,
+      "ocorrencias": 348
+    }
+  },
+  "esforço": {
+    "strive": {
+      "ipa": "ˌesfˈɔɾəsʊ",
+      "confianca": 0.7672955974842768,
+      "ocorrencias": 159
+    },
+    "effort": {
+      "ipa": "ˌesfˈoɾəsʊ",
+      "confianca": 0.9029850746268657,
+      "ocorrencias": 268
+    }
+  },
+  "desgelo": {
+    "defrost": {
+      "ipa": "dˌezʒˈɛlʊ",
+      "confianca": 0.9806295399515739,
+      "ocorrencias": 413
+    },
+    "defrosting": {
+      "ipa": "dˌezʒˈelʊ",
+      "confianca": 0.8908382066276803,
+      "ocorrencias": 513
+    }
+  },
+  "desmantelo": {
+    "dismantling": {
+      "ipa": "dˌezmɐ̃ŋtˈelʊ",
+      "confianca": 0.8491620111731844,
+      "ocorrencias": 358
+    },
+    "dismantle": {
+      "ipa": "dˌezmɐ̃ŋtˈɛlʊ",
+      "confianca": 0.9931506849315068,
+      "ocorrencias": 438
+    }
+  },
+  "torno": {
+    "turn": {
+      "ipa": "tˈɔɾənʊ",
+      "confianca": 0.973741794310722,
+      "ocorrencias": 457
+    },
+    "lathe": {
+      "ipa": "tˈoɾənʊ",
+      "confianca": 0.7717391304347826,
+      "ocorrencias": 276
+    },
+    "around": {
+      "ipa": "tˈoɾənʊ",
+      "confianca": 1.0,
+      "ocorrencias": 35
+    }
+  },
+  "consolo": {
+    "console": {
+      "ipa": "kˌoŋsˈɔlʊ",
+      "confianca": 0.9196675900277008,
+      "ocorrencias": 361
+    },
+    "consolation": {
+      "ipa": "kˌoŋsˈolʊ",
+      "confianca": 0.8388625592417062,
+      "ocorrencias": 422
+    }
+  },
+  "escabelo": {
+    "dishevel": {
+      "ipa": "ˌeskabˈɛlʊ",
+      "confianca": 0.9354838709677419,
+      "ocorrencias": 279
+    },
+    "stool": {
+      "ipa": "ˌeskabˈelʊ",
+      "confianca": 0.8449612403100775,
+      "ocorrencias": 258
+    }
+  },
+  "troco": {
+    "exchange": {
+      "ipa": "trˈɔkʊ",
+      "confianca": 0.7283582089552239,
+      "ocorrencias": 335
+    },
+    "change": {
+      "ipa": "trˈokʊ",
+      "confianca": 0.8107255520504731,
+      "ocorrencias": 317
+    }
+  },
+  "coro": {
+    "choir": {
+      "ipa": "kˈoɾʊ",
+      "confianca": 0.8175287356321839,
+      "ocorrencias": 696
+    },
+    "blush": {
+      "ipa": "kˈɔɾʊ",
+      "confianca": 0.8071942446043165,
+      "ocorrencias": 695
+    }
+  },
+  "gelo": {
+    "ice": {
+      "ipa": "ʒˈelʊ",
+      "confianca": 0.8064516129032258,
+      "ocorrencias": 279
+    },
+    "freeze": {
+      "ipa": "ʒˈɛlʊ",
+      "confianca": 0.8318965517241379,
+      "ocorrencias": 232
+    }
+  },
+  "choco": {
+    "hatch": {
+      "ipa": "ʃˈɔkʊ",
+      "confianca": 0.7511111111111111,
+      "ocorrencias": 225
+    },
+    "addled": {
+      "ipa": "ʃˈokʊ",
+      "confianca": 0.6585365853658537,
+      "ocorrencias": 246
+    },
+    "cuttlefish": {
+      "ipa": "ʃˈokʊ",
+      "confianca": 0.7037037037037037,
+      "ocorrencias": 243
+    }
+  },
+  "destroço": {
+    "wreckage": {
+      "ipa": "dˌestrˈosʊ",
+      "confianca": 0.9163879598662207,
+      "ocorrencias": 299
+    },
+    "wreck": {
+      "ipa": "dˌestrˈɔsʊ",
+      "confianca": 0.9587628865979382,
+      "ocorrencias": 291
+    }
+  },
+  "emprego": {
+    "job": {
+      "ipa": "ˌeɪmprˈeɡʊ",
+      "confianca": 0.8954869358669834,
+      "ocorrencias": 421
+    },
+    "employ": {
+      "ipa": "ˌeɪmprˈɛɡʊ",
+      "confianca": 0.6962616822429907,
+      "ocorrencias": 428
+    }
+  },
+  "escorço": {
+    "foreshortening": {
+      "ipa": "ˌeskˈoɾəsʊ",
+      "confianca": 0.8085642317380353,
+      "ocorrencias": 397
+    },
+    "foreshorten": {
+      "ipa": "ˌeskˈɔɾəsʊ",
+      "confianca": 0.9166666666666666,
+      "ocorrencias": 336
+    }
+  },
+  "posto": {
+    "post": {
+      "ipa": "pˈɔstʊ",
+      "confianca": 0.5007052186177715,
+      "ocorrencias": 709
+    },
+    "station": {
+      "ipa": "pˈostʊ",
+      "confianca": 0.9469339622641509,
+      "ocorrencias": 848
+    }
+  },
+  "acerto": {
+    "settlement": {
+      "ipa": "ˌasˈeɾətʊ",
+      "confianca": 0.891566265060241,
+      "ocorrencias": 996
+    },
+    "adjust": {
+      "ipa": "ˌasˈɛɾətʊ",
+      "confianca": 0.7323741007194244,
+      "ocorrencias": 695
+    }
+  },
+  "cobro": {
+    "cessation": {
+      "ipa": "kˈobrʊ",
+      "confianca": 0.8129175946547884,
+      "ocorrencias": 449
+    },
+    "collect": {
+      "ipa": "kˈɔbrʊ",
+      "confianca": 0.8004694835680751,
+      "ocorrencias": 426
+    }
+  },
+  "domo": {
+    "tame": {
+      "ipa": "dˈɔmʊ",
+      "confianca": 0.9958333333333333,
+      "ocorrencias": 480
+    },
+    "dome": {
+      "ipa": "dˈomʊ",
+      "confianca": 0.8618421052631579,
+      "ocorrencias": 456
+    }
+  },
+  "erro": {
+    "error": {
+      "ipa": "ˈexʊ",
+      "confianca": 0.9035087719298246,
+      "ocorrencias": 342
+    },
+    "err": {
+      "ipa": "ˈɛxʊ",
+      "confianca": 0.6564885496183206,
+      "ocorrencias": 262
+    }
+  },
+  "conforto": {
+    "comfort": {
+      "ipa": "kˌoŋfˈoɾətʊ",
+      "confianca": 0.8663697104677061,
+      "ocorrencias": 449
+    },
+    "soothe": {
+      "ipa": "kˌoŋfˈɔɾətʊ",
+      "confianca": 0.7941952506596306,
+      "ocorrencias": 379
+    }
+  },
+  "gosto": {
+    "taste": {
+      "ipa": "ɡˈostʊ",
+      "confianca": 0.7932011331444759,
+      "ocorrencias": 706
+    },
+    "like": {
+      "ipa": "ɡˈɔstʊ",
+      "confianca": 0.9918809201623816,
+      "ocorrencias": 739
+    }
+  },
+  "lobo": {
+    "wolf": {
+      "ipa": "lˈobʊ",
+      "confianca": 0.6065573770491803,
+      "ocorrencias": 61
+    },
+    "lobe": {
+      "ipa": "lˈɔbʊ",
+      "confianca": 0.75,
+      "ocorrencias": 40
+    }
+  },
+  "arremedo": {
+    "imitation": {
+      "ipa": "ˌaxemˈedʊ",
+      "confianca": 0.9785276073619632,
+      "ocorrencias": 326
+    },
+    "mimic": {
+      "ipa": "ˌaxemˈɛdʊ",
+      "confianca": 0.9891891891891892,
+      "ocorrencias": 370
+    }
+  },
+  "torre": {
+    "roast": {
+      "ipa": "tˈɔxi",
+      "confianca": 0.8022492970946579,
+      "ocorrencias": 1067
+    },
+    "tower": {
+      "ipa": "tˈoxy",
+      "confianca": 0.8692722371967655,
+      "ocorrencias": 742
+    }
+  },
+  "reboco": {
+    "plaster": {
+      "ipa": "xˌebˈokʊ",
+      "confianca": 0.7702265372168284,
+      "ocorrencias": 309
+    },
+    "tow": {
+      "ipa": "xˌebˈɔkʊ",
+      "confianca": 0.8309352517985612,
+      "ocorrencias": 278
+    }
+  },
+  "decoro": {
+    "decorate": {
+      "ipa": "dˌekˈɔɾʊ",
+      "confianca": 1.0,
+      "ocorrencias": 515
+    },
+    "decorum": {
+      "ipa": "dˌekˈoɾʊ",
+      "confianca": 0.6804347826086956,
+      "ocorrencias": 460
+    },
+    "memorize": {
+      "ipa": "dˌekˈɔɾʊ",
+      "confianca": 0.8,
+      "ocorrencias": 5
+    }
+  },
+  "abono": {
+    "allowance": {
+      "ipa": "ˌabˈonʊ",
+      "confianca": 0.8914027149321267,
+      "ocorrencias": 442
+    },
+    "vouch": {
+      "ipa": "ˌabˈɔnʊ",
+      "confianca": 0.9414414414414415,
+      "ocorrencias": 444
+    }
+  },
+  "tola": {
+    "foolish": {
+      "ipa": "tˈolæ",
+      "confianca": 0.9970238095238095,
+      "ocorrencias": 672
+    },
+    "head": {
+      "ipa": "tˈɔlæ",
+      "confianca": 0.9965753424657534,
+      "ocorrencias": 584
+    }
+  },
+  "desdobro": {
+    "unfolding": {
+      "ipa": "dˌezdˈobrʊ",
+      "confianca": 0.9429928741092637,
+      "ocorrencias": 421
+    },
+    "unfold": {
+      "ipa": "dˌezdˈɔbrʊ",
+      "confianca": 1.0,
+      "ocorrencias": 342
+    }
+  },
+  "sopeso": {
+    "weigh_up": {
+      "ipa": "sˌopˈɛzʊ",
+      "confianca": 0.9388379204892966,
+      "ocorrencias": 327
+    },
+    "heft": {
+      "ipa": "sˌopˈezʊ",
+      "confianca": 0.8070175438596491,
+      "ocorrencias": 342
+    }
+  },
+  "desconsolo": {
+    "disconsolation": {
+      "ipa": "dˌeskoŋsˈolʊ",
+      "confianca": 0.8554913294797688,
+      "ocorrencias": 346
+    },
+    "dishearten": {
+      "ipa": "dˌeskoŋsˈɔlʊ",
+      "confianca": 0.8631921824104235,
+      "ocorrencias": 307
+    }
+  },
+  "fosso": {
+    "ditch": {
+      "ipa": "fˈosʊ",
+      "confianca": 0.7177033492822966,
+      "ocorrencias": 418
+    },
+    "root_up": {
+      "ipa": "fˈɔsʊ",
+      "confianca": 0.8439897698209718,
+      "ocorrencias": 391
+    }
+  },
+  "congelo": {
+    "freezing": {
+      "ipa": "kˌoŋʒˈelʊ",
+      "confianca": 0.8701298701298701,
+      "ocorrencias": 385
+    },
+    "freeze": {
+      "ipa": "kˌoŋʒˈɛlʊ",
+      "confianca": 0.6527093596059114,
+      "ocorrencias": 406
+    }
+  },
+  "corte": {
+    "court_martial": {
+      "ipa": "kˈoɾətʃy",
+      "confianca": 0.8857142857142857,
+      "ocorrencias": 35
+    },
+    "cutback": {
+      "ipa": "kˈɔɾətʃy",
+      "confianca": 0.9117647058823529,
+      "ocorrencias": 34
+    },
+    "closure": {
+      "ipa": "kˈɔɾətʃy",
+      "confianca": 1.0,
+      "ocorrencias": 34
+    },
+    "court": {
+      "ipa": "kˈoɾətʃy",
+      "confianca": 0.75,
+      "ocorrencias": 32
+    },
+    "cut": {
+      "ipa": "kˈɔɾətʃy",
+      "confianca": 0.8888888888888888,
+      "ocorrencias": 18
+    },
+    "cutoff": {
+      "ipa": "kˈɔɾətʃy",
+      "confianca": 1.0,
+      "ocorrencias": 39
+    },
+    "court_of_law": {
+      "ipa": "kˈoɾətʃy",
+      "confianca": 0.7368421052631579,
+      "ocorrencias": 38
+    }
+  },
+  "encosto": {
+    "lean": {
+      "ipa": "ˌeɪŋkˈɔstʊ",
+      "confianca": 1.0,
+      "ocorrencias": 184
+    },
+    "backrest": {
+      "ipa": "ˌeɪŋkˈostʊ",
+      "confianca": 0.9238410596026491,
+      "ocorrencias": 302
+    }
+  },
+  "aperto": {
+    "squeeze": {
+      "ipa": "ˌapˈeɾətʊ",
+      "confianca": 0.9230769230769231,
+      "ocorrencias": 299
+    },
+    "tighten": {
+      "ipa": "ˌapˈɛɾətʊ",
+      "confianca": 0.9923273657289002,
+      "ocorrencias": 391
+    }
+  },
+  "redobro": {
+    "redoubling": {
+      "ipa": "xˌedˈobrʊ",
+      "confianca": 0.9818181818181818,
+      "ocorrencias": 385
+    },
+    "redouble": {
+      "ipa": "xˌedˈɔbrʊ",
+      "confianca": 0.9949874686716792,
+      "ocorrencias": 399
+    }
+  },
+  "toldo": {
+    "cloud_over": {
+      "ipa": "tˈɔldʊ",
+      "confianca": 0.9597523219814241,
+      "ocorrencias": 323
+    },
+    "awning": {
+      "ipa": "tˈoldʊ",
+      "confianca": 0.8360655737704918,
+      "ocorrencias": 427
+    }
+  },
+  "desemprego": {
+    "verb": {
+      "ipa": "dˌezeɪmprˈɛɡʊ",
+      "confianca": 0.9724770642201835,
+      "ocorrencias": 436
+    },
+    "noun": {
+      "ipa": "dˌezeɪmprˈeɡʊ",
+      "confianca": 0.7064439140811456,
+      "ocorrencias": 419
+    }
+  },
+  "logro": {
+    "deceive": {
+      "ipa": "lˈɔɡrʊ",
+      "confianca": 0.53156146179402,
+      "ocorrencias": 301
+    },
+    "deceit": {
+      "ipa": "lˈoɡrʊ",
+      "confianca": 0.8133333333333334,
+      "ocorrencias": 225
+    }
+  },
+  "espeto": {
+    "stab": {
+      "ipa": "ˌespˈɛtʊ",
+      "confianca": 0.99375,
+      "ocorrencias": 160
+    },
+    "skewer": {
+      "ipa": "ˌespˈetʊ",
+      "confianca": 0.8136645962732919,
+      "ocorrencias": 322
+    }
+  },
+  "governo": {
+    "government": {
+      "ipa": "ɡˌovˈeɾənʊ",
+      "confianca": 0.7915492957746478,
+      "ocorrencias": 355
+    },
+    "govern": {
+      "ipa": "ɡˌovˈɛɾənʊ",
+      "confianca": 0.9833333333333333,
+      "ocorrencias": 300
+    }
+  },
+  "apelo": {
+    "appeal": {
+      "ipa": "ˌapˈelʊ",
+      "confianca": 0.6035242290748899,
+      "ocorrencias": 454
+    },
+    "call_out": {
+      "ipa": "ˌapˈɛlʊ",
+      "confianca": 0.8693467336683417,
+      "ocorrencias": 398
+    }
+  },
+  "aceno": {
+    "nod": {
+      "ipa": "ˌasˈenʊ",
+      "confianca": 0.9301675977653632,
+      "ocorrencias": 358
+    },
+    "beckon": {
+      "ipa": "ˌasˈɛnʊ",
+      "confianca": 0.5041551246537396,
+      "ocorrencias": 361
+    }
+  },
+  "abrolho": {
+    "caltrop": {
+      "ipa": "ˌabrˈoljʊ",
+      "confianca": 0.7109144542772862,
+      "ocorrencias": 339
+    },
+    "sprout": {
+      "ipa": "ˌabrˈɔljʊ",
+      "confianca": 0.7036144578313253,
+      "ocorrencias": 415
+    }
+  },
+  "renovo": {
+    "renew": {
+      "ipa": "xˌenˈɔvʊ",
+      "confianca": 1.0,
+      "ocorrencias": 57
+    },
+    "shoot": {
+      "ipa": "xˌenˈovʊ",
+      "confianca": 0.9074074074074074,
+      "ocorrencias": 54
+    }
+  },
+  "desempeço": {
+    "riddance": {
+      "ipa": "dˌezeɪmpˈesʊ",
+      "confianca": 0.9345088161209067,
+      "ocorrencias": 397
+    },
+    "free_up": {
+      "ipa": "dˌezeɪmpˈɛsʊ",
+      "confianca": 0.9773299748110831,
+      "ocorrencias": 397
+    }
+  },
+  "golfo": {
+    "spew": {
+      "ipa": "ɡˈɔlfʊ",
+      "confianca": 0.547752808988764,
+      "ocorrencias": 356
+    },
+    "gulf": {
+      "ipa": "ɡˈolfʊ",
+      "confianca": 0.7685714285714286,
+      "ocorrencias": 350
+    }
+  },
+  "sobro": {
+    "be_left_over": {
+      "ipa": "sˈɔbrʊ",
+      "confianca": 0.6611111111111111,
+      "ocorrencias": 180
+    },
+    "cork_oak": {
+      "ipa": "sˈobrʊ",
+      "confianca": 0.729064039408867,
+      "ocorrencias": 203
+    }
+  },
+  "topo": {
+    "bump_into": {
+      "ipa": "tˈɔpʊ",
+      "confianca": 0.8,
+      "ocorrencias": 250
+    },
+    "summit": {
+      "ipa": "tˈopʊ",
+      "confianca": 0.996309963099631,
+      "ocorrencias": 271
+    }
+  },
+  "arrepelo": {
+    "snatch": {
+      "ipa": "ˌaxepˈɛlʊ",
+      "confianca": 0.943342776203966,
+      "ocorrencias": 353
+    },
+    "hair_pulling": {
+      "ipa": "ˌaxepˈelʊ",
+      "confianca": 0.849624060150376,
+      "ocorrencias": 266
+    }
+  },
+  "cerco": {
+    "surround": {
+      "ipa": "sˈɛɾəkʊ",
+      "confianca": 1.0,
+      "ocorrencias": 421
+    },
+    "siege": {
+      "ipa": "sˈeɾəkʊ",
+      "confianca": 0.7300469483568075,
+      "ocorrencias": 426
+    }
+  },
+  "contorno": {
+    "contour": {
+      "ipa": "kˌoŋtˈoɾənʊ",
+      "confianca": 0.8732876712328768,
+      "ocorrencias": 292
+    },
+    "circumvent": {
+      "ipa": "kˌoŋtˈɔɾənʊ",
+      "confianca": 0.9917127071823204,
+      "ocorrencias": 362
+    }
+  },
+  "novelo": {
+    "yarn_ball": {
+      "ipa": "nˌovˈelʊ",
+      "confianca": 0.9238410596026491,
+      "ocorrencias": 302
+    },
+    "narrate": {
+      "ipa": "nˌovˈɛlʊ",
+      "confianca": 0.6951566951566952,
+      "ocorrencias": 351
+    }
+  },
+  "arroto": {
+    "burp": {
+      "ipa": "ˌaxˈɔtʊ",
+      "confianca": 0.6197530864197531,
+      "ocorrencias": 405
+    },
+    "belch": {
+      "ipa": "ˌaxˈotʊ",
+      "confianca": 0.8095238095238095,
+      "ocorrencias": 378
+    }
+  },
+  "arremesso": {
+    "fling": {
+      "ipa": "ˌaxemˈɛsʊ",
+      "confianca": 0.9921875,
+      "ocorrencias": 384
+    },
+    "throw": {
+      "ipa": "ˌaxemˈesʊ",
+      "confianca": 0.9328358208955224,
+      "ocorrencias": 402
+    }
+  },
+  "rolo": {
+    "roll": {
+      "ipa": "xˈolʊ",
+      "confianca": 0.977491961414791,
+      "ocorrencias": 311
+    },
+    "tumble": {
+      "ipa": "xˈɔlʊ",
+      "confianca": 0.8340248962655602,
+      "ocorrencias": 241
+    }
+  },
+  "esmero": {
+    "perfect": {
+      "ipa": "ˌezmˈɛɾʊ",
+      "confianca": 0.8064516129032258,
+      "ocorrencias": 248
+    },
+    "meticulousness": {
+      "ipa": "ˌezmˈeɾʊ",
+      "confianca": 0.8857142857142857,
+      "ocorrencias": 280
+    }
+  },
+  "forro": {
+    "lining": {
+      "ipa": "fˈoxʊ",
+      "confianca": 0.9009287925696594,
+      "ocorrencias": 323
+    },
+    "line": {
+      "ipa": "fˈɔxʊ",
+      "confianca": 1.0,
+      "ocorrencias": 250
+    }
+  },
+  "desafogo": {
+    "relief": {
+      "ipa": "dˌezafˈoɡʊ",
+      "confianca": 0.8259668508287292,
+      "ocorrencias": 362
+    },
+    "relieve": {
+      "ipa": "dˌezafˈɔɡʊ",
+      "confianca": 0.996969696969697,
+      "ocorrencias": 330
+    }
+  },
+  "desapego": {
+    "indifference": {
+      "ipa": "dˌezapˈeɡʊ",
+      "confianca": 0.7361419068736141,
+      "ocorrencias": 451
+    },
+    "let_go": {
+      "ipa": "dˌezapˈɛɡʊ",
+      "confianca": 0.8921933085501859,
+      "ocorrencias": 269
+    }
+  },
+  "solto": {
+    "release": {
+      "ipa": "sˈɔltʊ",
+      "confianca": 0.9771986970684039,
+      "ocorrencias": 307
+    },
+    "loose": {
+      "ipa": "sˈoltʊ",
+      "confianca": 0.7575757575757576,
+      "ocorrencias": 198
+    }
+  },
+  "jorro": {
+    "jet": {
+      "ipa": "ʒˈoxʊ",
+      "confianca": 0.9942528735632183,
+      "ocorrencias": 348
+    },
+    "gush": {
+      "ipa": "ʒˈɔxʊ",
+      "confianca": 0.6609195402298851,
+      "ocorrencias": 348
+    }
+  },
+  "despego": {
+    "detachment": {
+      "ipa": "dˌespˈeɡʊ",
+      "confianca": 0.9136904761904762,
+      "ocorrencias": 336
+    },
+    "detach": {
+      "ipa": "dˌespˈɛɡʊ",
+      "confianca": 0.9496644295302014,
+      "ocorrencias": 298
+    }
+  },
+  "força": {
+    "force": {
+      "ipa": "fˈɔɾəsæ",
+      "confianca": 1.0,
+      "ocorrencias": 74
+    },
+    "strength": {
+      "ipa": "fˈoɾəsæ",
+      "confianca": 1.0,
+      "ocorrencias": 62
+    }
+  },
+  "engodo": {
+    "lure": {
+      "ipa": "ˌeɪŋɡˈɔdʊ",
+      "confianca": 0.9926108374384236,
+      "ocorrencias": 406
+    },
+    "bait": {
+      "ipa": "ˌeɪŋɡˈodʊ",
+      "confianca": 0.8730650154798761,
+      "ocorrencias": 323
+    }
+  },
+  "desconforto": {
+    "discomfit": {
+      "ipa": "dˌeskoŋfˈɔɾətʊ",
+      "confianca": 0.968503937007874,
+      "ocorrencias": 254
+    },
+    "discomfort": {
+      "ipa": "dˌeskoŋfˈoɾətʊ",
+      "confianca": 0.8384401114206128,
+      "ocorrencias": 359
+    }
+  },
+  "peso": {
+    "currency": {
+      "ipa": "pˈezʊ",
+      "confianca": 1.0,
+      "ocorrencias": 13
+    },
+    "weight": {
+      "ipa": "pˈezʊ",
+      "confianca": 0.9142857142857143,
+      "ocorrencias": 35
+    },
+    "weigh": {
+      "ipa": "pˈɛzʊ",
+      "confianca": 0.8518518518518519,
+      "ocorrencias": 27
+    },
+    "importance": {
+      "ipa": "pˈezʊ",
+      "confianca": 0.8333333333333334,
+      "ocorrencias": 30
+    },
+    "burden": {
+      "ipa": "pˈezʊ",
+      "confianca": 1.0,
+      "ocorrencias": 24
+    }
+  },
+  "entorno": {
+    "spill": {
+      "ipa": "ˌeɪŋtˈɔɾənʊ",
+      "confianca": 0.8858858858858859,
+      "ocorrencias": 333
+    },
+    "surroundings": {
+      "ipa": "ˌeɪŋtˈoɾənʊ",
+      "confianca": 0.8568421052631578,
+      "ocorrencias": 475
+    }
+  },
+  "cor": {
+    "colour": {
+      "ipa": "kˈor",
+      "confianca": 0.8611111111111112,
+      "ocorrencias": 72
+    },
+    "by_heart": {
+      "ipa": "kˈɔr",
+      "confianca": 0.6071428571428571,
+      "ocorrencias": 28
+    }
+  },
+  "despojo": {
+    "spoils": {
+      "ipa": "dˌespˈoʒʊ",
+      "confianca": 0.8973684210526316,
+      "ocorrencias": 380
+    },
+    "strip": {
+      "ipa": "dˌespˈɔʒʊ",
+      "confianca": 0.984375,
+      "ocorrencias": 256
+    }
+  },
+  "forma": {
+    "kind": {
+      "ipa": "fˈɔɾəmæ",
+      "confianca": 1.0,
+      "ocorrencias": 31
+    },
+    "manner": {
+      "ipa": "fˈɔɾəmæ",
+      "confianca": 1.0,
+      "ocorrencias": 40
+    },
+    "mould": {
+      "ipa": "fˈoɾəmæ",
+      "confianca": 1.0,
+      "ocorrencias": 9
+    },
+    "shape": {
+      "ipa": "fˈɔɾəmæ",
+      "confianca": 1.0,
+      "ocorrencias": 17
+    }
+  },
+  "bola": {
+    "ball": {
+      "ipa": "bˈɔlæ",
+      "confianca": 1.0,
+      "ocorrencias": 55
+    },
+    "loaf": {
+      "ipa": "bˈolæ",
+      "confianca": 1.0,
+      "ocorrencias": 31
+    }
+  },
+  "polo": {
+    "pole": {
+      "ipa": "pˈɔlʊ",
+      "confianca": 0.9259259259259259,
+      "ocorrencias": 27
+    },
+    "hub": {
+      "ipa": "pˈɔlʊ",
+      "confianca": 0.7368421052631579,
+      "ocorrencias": 19
+    },
+    "fledgling": {
+      "ipa": "pˈolʊ",
+      "confianca": 0.8181818181818182,
+      "ocorrencias": 11
+    },
+    "sport_polo": {
+      "ipa": "pˈɔlʊ",
+      "confianca": 0.875,
+      "ocorrencias": 8
+    }
+  }
+}
