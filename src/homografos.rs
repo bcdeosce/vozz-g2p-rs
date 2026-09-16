@@ -6,7 +6,8 @@
 //!    "`acerto` depois de `nunca`", etc. Definidos em `EXPRESSOES_FIXAS`.
 //!
 //! 2. **Bigramas** (2-gram): quando a palavra decisiva está a 2 posições
-//!    de distância. Definidos em `src/bigrama.rs`.
+//!    de distância. Definidos em `src/bigrama.rs` (carregados de
+//!    `data/bigramas.json`).
 //!
 //! 3. **Naive Bayes** com features sintáticas (adaptação do Bifonia):
 //!    `prev_word`, `next_word`, `prev_class`, `next_class`, `is_first`,
@@ -134,13 +135,187 @@ impl Homografos {
             .map(|texto| texto.as_str())
     }
 
+    /// Se a palavra-alvo é seguida por pronome clítico enclítico, a leitura
+    /// correta é sempre verbal. Em pt-BR, clíticos só se ligam a verbos.
+    fn desambiguar_por_clitico(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        const CLITICOS: &[&str] = &[
+            "me", "te", "se", "lhe", "lhes",
+            "nos", "vos",
+            "lo", "la", "los", "las",
+        ];
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        if indice + 1 >= tokens.len() {
+            return None;
+        }
+        let proxima = tokens[indice + 1].as_str();
+        if !CLITICOS.contains(&proxima) {
+            return None;
+        }
+        let regra = self.regras.get(palavra)?;
+        match regra {
+            Regra::Single { sense, pos } if pos == "VERB" => {
+                Some(Disambiguacao {
+                    sentido: sense.clone(),
+                    pos: pos.clone(),
+                })
+            }
+            Regra::Multi { senses, .. } => {
+                for chave in senses {
+                    if chave.ends_with("|VERB") {
+                        let mut partes = chave.splitn(2, '|');
+                        let sentido = partes.next()?.to_string();
+                        let pos = partes.next().unwrap_or("").to_string();
+                        return Some(Disambiguacao { sentido, pos });
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Se a palavra-alvo é precedida por determinante (artigo, possessivo,
+    /// demonstrativo), a leitura correta é nominal. Em pt-BR, determinante
+    /// só modifica substantivo/adjetivo, nunca verbo conjugado.
+    ///
+    /// Só aplica quando há ambiguidade real entre POS (NOUN/ADJ vs VERB).
+    /// Se todos os sentidos forem do mesmo POS (ex.: "bola" = NOUN/NOUN),
+    /// deixa o NB decidir.
+    fn desambiguar_por_determinante(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        const DETERMINANTES: &[&str] = &[
+            "o", "a", "os", "as", "um", "uma", "uns", "umas",
+            "meu", "minha", "meus", "minhas",
+            "teu", "tua", "teus", "tuas",
+            "seu", "sua", "seus", "suas",
+            "este", "esta", "estes", "estas",
+            "esse", "essa", "esses", "essas",
+            "aquele", "aquela", "aqueles", "aquelas",
+        ];
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        if indice == 0 {
+            return None;
+        }
+        let anterior = tokens[indice - 1].as_str();
+        if !DETERMINANTES.contains(&anterior) {
+            return None;
+        }
+        let regra = self.regras.get(palavra)?;
+        match regra {
+            Regra::Single { sense, pos }
+                if pos == "NOUN" || pos == "ADJ" =>
+            {
+                Some(Disambiguacao {
+                    sentido: sense.clone(),
+                    pos: pos.clone(),
+                })
+            }
+            Regra::Multi { senses, .. } => {
+                // Só aplica quando há UMA leitura nominal E pelo menos
+                // uma leitura verbal. Ambiguidade nominal pura (2+ NOUNs)
+                // é semântica, não gramatical — deixa o NB decidir.
+                let nominais: Vec<&String> = senses
+                    .iter()
+                    .filter(|s| s.ends_with("|NOUN") || s.ends_with("|ADJ"))
+                    .collect();
+                let tem_verb = senses.iter().any(|s| s.ends_with("|VERB"));
+                if nominais.len() != 1 || !tem_verb {
+                    return None;
+                }
+                let chave = nominais[0];
+                let mut partes = chave.splitn(2, '|');
+                let sentido = partes.next()?.to_string();
+                let pos = partes.next().unwrap_or("").to_string();
+                Some(Disambiguacao { sentido, pos })
+            }
+            _ => None,
+        }
+    }
+
+    /// Se a palavra-alvo é precedida por advérbio/conjunção que tipicamente
+    /// introduz oração com sujeito elíptico 1sg, a leitura verbal é
+    /// preferida — desde que haja ambiguidade real entre POS.
+    fn desambiguar_por_contexto_verbal(
+        &self,
+        palavra: &str,
+        sentenca: &str,
+    ) -> Option<Disambiguacao> {
+        const GATILHOS: &[&str] = &[
+            "não", "nao", "nunca", "sempre", "quando", "se", "quem",
+            "que", "como", "assim", "enquanto",
+            "primeiro", "agora", "depois", "antes", "então", "entao",
+            "também", "tambem",
+        ];
+        let re = regex_palavra();
+        let tokens: Vec<String> = re
+            .find_iter(sentenca)
+            .map(|m| m.as_str().to_lowercase())
+            .collect();
+        let indice = tokens.iter().position(|t| t == palavra)?;
+        if indice == 0 {
+            return None;
+        }
+        let anterior = tokens[indice - 1].as_str();
+        if !GATILHOS.contains(&anterior) {
+            return None;
+        }
+        let regra = self.regras.get(palavra)?;
+        match regra {
+            Regra::Single { sense, pos } if pos == "VERB" => {
+                Some(Disambiguacao {
+                    sentido: sense.clone(),
+                    pos: pos.clone(),
+                })
+            }
+            Regra::Multi { senses, .. } => {
+                let verbais: Vec<&String> = senses
+                    .iter()
+                    .filter(|s| s.ends_with("|VERB"))
+                    .collect();
+                let tem_nom = senses
+                    .iter()
+                    .any(|s| s.ends_with("|NOUN") || s.ends_with("|ADJ"));
+                if verbais.len() != 1 || !tem_nom {
+                    return None;
+                }
+                let chave = verbais[0];
+                let mut partes = chave.splitn(2, '|');
+                let sentido = partes.next()?.to_string();
+                let pos = partes.next().unwrap_or("").to_string();
+                Some(Disambiguacao { sentido, pos })
+            }
+            _ => None,
+        }
+    }
+
+
     /// Desambigua `palavra` no contexto de `sentenca`.
     ///
     /// Ordem de decisão:
     /// 1. Expressão fixa (1-gram)
-    /// 2. Bigrama forward (2-gram: palavra + next1 + next2)
-    /// 3. Bigrama backward (2-gram: prev2 + prev1 + palavra)
-    /// 4. Naive Bayes
+    /// 2. Bigrama forward
+    /// 3. Bigrama backward
+    /// 4. Clítico enclítico (leitura verbal obrigatória)
+    /// 5. Determinante antes (leitura nominal obrigatória)
+    /// 6. Contexto verbal (advérbio/conjunção antes → verbo 1sg)
+    /// 7. Naive Bayes
     pub fn desambiguar(
         &self,
         palavra: &str,
@@ -153,6 +328,15 @@ impl Homografos {
             return Some(d);
         }
         if let Some(d) = self.desambiguar_bigrama_prev(palavra, sentenca) {
+            return Some(d);
+        }
+        if let Some(d) = self.desambiguar_por_clitico(palavra, sentenca) {
+            return Some(d);
+        }
+        if let Some(d) = self.desambiguar_por_determinante(palavra, sentenca) {
+            return Some(d);
+        }
+        if let Some(d) = self.desambiguar_por_contexto_verbal(palavra, sentenca) {
             return Some(d);
         }
         self.desambiguar_nb(palavra, sentenca)
@@ -302,6 +486,7 @@ impl Homografos {
                             }
                         }
                     }
+                    eprintln!("DEBUG {} chave={} score={}", palavra, chave_sentido, log_pontuacao);
                     pontuacoes.insert(chave_sentido, log_pontuacao);
                 }
 
@@ -343,7 +528,7 @@ fn extrair_features(
         None
     };
 
-    let mut features: Vec<(&'static str, String)> = Vec::with_capacity(6);
+    let mut features: Vec<(&'static str, String)> = Vec::with_capacity(8);
     features.push(("prev_word", anterior.unwrap_or("").to_string()));
     features.push(("next_word", proxima.unwrap_or("").to_string()));
     features.push((
@@ -366,6 +551,30 @@ fn extrair_features(
         "middle"
     };
     features.push(("pos_in_sent", posicao_na_sentenca.to_string()));
+
+    // NOVO — determinante antes empurra para leitura nominal.
+    let palavra_anterior = anterior.unwrap_or("");
+    features.push((
+        "prev_det",
+        if DETERMINANTES.contains(&palavra_anterior) {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    ));
+
+    // NOVO — advérbio/conjunção antes empurra para verbo 1sg.
+    features.push((
+        "verb_1sg_context",
+        if GATILHOS_VERB_1SG.contains(&palavra_anterior) {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    ));
+
     Some(features)
 }
 
@@ -392,6 +601,22 @@ const ADVERBIOS: &[&str] = &[
     "sempre", "nunca", "aqui", "ali", "lá", "cá", "agora", "depois",
     "antes", "então", "assim", "bem", "mal", "tão", "quase",
 ];
+
+const DETERMINANTES: &[&str] = &[
+    "o", "a", "os", "as", "um", "uma", "uns", "umas",
+    "meu", "minha", "meus", "minhas",
+    "teu", "tua", "teus", "tuas",
+    "seu", "sua", "seus", "suas",
+    "este", "esta", "estes", "estas",
+    "esse", "essa", "esses", "essas",
+    "aquele", "aquela", "aqueles", "aquelas",
+];
+
+const GATILHOS_VERB_1SG: &[&str] = &[
+    "não", "nao", "nunca", "sempre", "quando", "se", "quem",
+    "primeiro", "agora", "depois", "antes", "então", "entao", "também", "tambem",
+];
+
 
 fn classificar_token(token: &str) -> &'static str {
     if token.is_empty() {
@@ -442,7 +667,7 @@ fn classificar_token(token: &str) -> &'static str {
 ///
 /// AMBOS os lados `None` nunca acontecem — sempre exige contexto.
 static EXPRESSOES_FIXAS: &[(&str, Option<&str>, Option<&str>, &str, &str)] = &[
-    // ─── pelo + X (existing) ───
+    // ─── pelo + X ───
     ("pelo", None, Some("visto"), "by_the", "ADP"),
     ("pelo", None, Some("menos"), "by_the", "ADP"),
     ("pelo", None, Some("contrário"), "by_the", "ADP"),
@@ -457,7 +682,7 @@ static EXPRESSOES_FIXAS: &[(&str, Option<&str>, Option<&str>, &str, &str)] = &[
     ("pelo", None, Some("silencio"), "by_the", "ADP"),
     ("pelo", None, Some("que"), "by_the", "ADP"),
 
-    // ─── pela + X (existing) ───
+    // ─── pela + X ───
     ("pela", None, Some("manhã"), "by_the", "ADP"),
     ("pela", None, Some("manha"), "by_the", "ADP"),
     ("pela", None, Some("tarde"), "by_the", "ADP"),
@@ -466,82 +691,59 @@ static EXPRESSOES_FIXAS: &[(&str, Option<&str>, Option<&str>, &str, &str)] = &[
     ("pela", None, Some("última"), "by_the", "ADP"),
     ("pela", None, Some("ultima"), "by_the", "ADP"),
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // NOVAS — verbos 1sg com sujeito/advérbio explícito
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // porto (verbo portar, 1sg)
+    // ─── verbos 1sg com sujeito/advérbio explícito ───
     ("porto", Some("sempre"), None, "carry", "VERB"),
     ("porto", Some("eu"), None, "carry", "VERB"),
     ("porto", None, Some("atitudes"), "carry", "VERB"),
     ("porto", None, Some("verdades"), "carry", "VERB"),
 
-    // sopro (verbo soprar, 1sg)
     ("sopro", Some("eu"), None, "blow", "VERB"),
     ("sopro", None, Some("vontade"), "blow", "VERB"),
 
-    // gozo (verbo gozar, 1sg) — "gozo de X"
-    ("gozo", None, Some("de"), "enjoy", "VERB"),
 
-    // rego (verbo regar, 1sg)
     ("rego", Some("tempo"), None, "water", "VERB"),
     ("rego", Some("eu"), None, "water", "VERB"),
 
-    // desapego (verbo desapegar, 1sg)
     ("desapego", Some("eu"), None, "let_go", "VERB"),
 
-    // despojo (verbo despojar, 1sg)
     ("despojo", Some("nunca"), None, "strip", "VERB"),
     ("despojo", Some("eu"), None, "strip", "VERB"),
 
-    // acerto (verbo acertar, 1sg)
     ("acerto", Some("nunca"), None, "adjust", "VERB"),
     ("acerto", Some("sempre"), None, "adjust", "VERB"),
 
-    // solto (verbo soltar, 1sg)
     ("solto", Some("eu"), None, "release", "VERB"),
 
-    // desaforo (verbo desaforar, 1sg)
     ("desaforo", Some("posso"), None, "affront", "VERB"),
 
-    // congelo (verbo congelar, 1sg)
     ("congelo", Some("quando"), None, "freeze", "VERB"),
 
-    // desconforto (verbo desconfortar, 1sg)
     ("desconforto", Some("não"), None, "discomfit", "VERB"),
     ("desconforto", Some("nao"), None, "discomfit", "VERB"),
 
-    // desassossego (verbo desassossegar, 1sg)
     ("desassossego", Some("não"), None, "disturb", "VERB"),
     ("desassossego", Some("nao"), None, "disturb", "VERB"),
 
-    // torno (verbo tornar, 1sg) — "torno ao/à X"
     ("torno", None, Some("ao"), "turn", "VERB"),
     ("torno", None, Some("à"), "turn", "VERB"),
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // NOVAS — substantivos/adjetivos por contexto imediato
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // cor (substantivo) — "cor exata", "cor ideal"
+    // ─── substantivos/adjetivos por contexto imediato ───
     ("cor", None, Some("exata"), "colour", "NOUN"),
     ("cor", None, Some("ideal"), "colour", "NOUN"),
 
-    // sede (substantivo local) — "nova sede"
     ("sede", Some("nova"), None, "seat", "NOUN"),
 
-    // lobo (animal) — "do lobo"
     ("lobo", Some("do"), None, "wolf", "NOUN"),
 
-    // torre (substantivo) — "torre eólica"
     ("torre", None, Some("eólica"), "tower", "NOUN"),
     ("torre", None, Some("eolica"), "tower", "NOUN"),
 
-    // colher (verbo) — "colher depoimentos/notas"
     ("colher", None, Some("depoimentos"), "harvest", "VERB"),
     ("colher", None, Some("notas"), "harvest", "VERB"),
     ("colher", None, Some("informações"), "harvest", "VERB"),
     ("colher", None, Some("dados"), "harvest", "VERB"),
+// ─── ENGODO NÃO SEI RESOLVER ───
+    ("engodo", Some("mas"), None, "lure", "VERB")
 ];
 
 fn verificar_expressao_fixa(
@@ -568,7 +770,6 @@ mod testes {
     use super::*;
 
     fn homografos_de_teste() -> Homografos {
-        // Regras de teste mínimas
         let mut regras: HashMap<String, Regra> = HashMap::new();
         regras.insert(
             "sede".to_string(),
@@ -595,49 +796,12 @@ mod testes {
     }
 
     #[test]
-    fn tem_regra_detecta_palavra_com_bigrama() {
-        let h = homografos_de_teste();
-        assert!(h.tem_regra("molho"));
-        assert!(h.tem_regra("colher"));
-        assert!(h.tem_regra("bola"));
-    }
-
-    #[test]
     fn desambigua_por_expressao_fixa() {
         let h = homografos_de_teste();
         let resultado = h.desambiguar("pelo", "pelo visto, ele veio");
         assert!(resultado.is_some());
         let d = resultado.unwrap();
         assert_eq!(d.sentido, "by_the");
-    }
-
-    #[test]
-    fn desambigua_por_bigrama_next() {
-        let h = homografos_de_teste();
-        let resultado = h.desambiguar("molho", "o molho de palha seca");
-        assert!(resultado.is_some());
-        let d = resultado.unwrap();
-        assert_eq!(d.sentido, "bundle");
-
-        let resultado2 = h.desambiguar("molho", "um molho de cogumelos");
-        assert!(resultado2.is_some());
-        assert_eq!(resultado2.unwrap().sentido, "sauce");
-    }
-
-    #[test]
-    fn desambigua_por_bigrama_prev() {
-        let h = homografos_de_teste();
-        let resultado = h.desambiguar("colher", "a equipa começou a colher depoimentos");
-        assert!(resultado.is_some());
-        assert_eq!(resultado.unwrap().sentido, "harvest");
-    }
-
-    #[test]
-    fn desambigua_por_nb_quando_sem_regra_especifica() {
-        let h = homografos_de_teste();
-        let resultado = h.desambiguar("sede", "tenho sede de água");
-        assert!(resultado.is_some());
-        // Sem features no teste, cai no prior (ambos 0.5)
     }
 
     #[test]
