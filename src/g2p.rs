@@ -1258,6 +1258,7 @@ fn resolver_palavra_contexto(
 ) -> String {
     // 0. Homógrafo anotado — prioridade máxima.
     //    O IPA é a forma base; aplicar todos os sândis.
+    eprintln!("DEBUG {} sentido={:?}", palavra, sentido);
     if let (Some(hom), Some(s)) = (homografos, sentido) {
         if let Some(ipa) = hom.ipa_para(palavra, s) {
             let ipa_s = aplicar_sandi_s_final(ipa.to_string(), proxima_inicial);
@@ -1363,7 +1364,6 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     // entre as duas. Se houver qualquer pontuação (vírgula, ponto,
     // ponto-e-vírgula, etc.), a inicial é `None` e o sândi é bloqueado.
     let proxima_por_palavra: Vec<Option<char>> = {
-        // Mapeia cada palavra ao seu índice nos tokens brutos.
         let mut posicoes: Vec<usize> = Vec::with_capacity(palavras.len());
         for (i, t) in tokens.iter().enumerate() {
             if t.chars().any(char::is_alphabetic) && !RE_PONTUACAO.is_match(t) {
@@ -1375,12 +1375,10 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         for k in 0..posicoes.len() {
             let pos_atual = posicoes[k];
             let Some(&pos_prox) = posicoes.get(k + 1) else {
-                // Última palavra: sem próxima.
                 resultado[k] = None;
                 continue;
             };
 
-            // Verifica se há pontuação entre pos_atual e pos_prox.
             let tem_pontuacao = ((pos_atual + 1)..pos_prox)
                 .any(|j| RE_PONTUACAO.is_match(tokens[j]));
 
@@ -1393,7 +1391,12 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         resultado
     };
 
-    // PASSE 1 — anotação de sentido para homógrafos
+    // PASSE 1 — anotação de sentido para homógrafos.
+    //
+    // Para palavras com hífen (ex.: `Desapego-me`), o alvo do classificador
+    // é o primeiro subword (`Desapego`). A tokenização interna de
+    // `desambiguar` (via `\w+`) já trata `Desapego-me` como duas palavras,
+    // então basta passar a chave correta.
     let anotacoes: Vec<Option<String>> = if let (Some(hom), false) =
         (opcoes.homografos, modo_isolado)
     {
@@ -1401,8 +1404,12 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
             .iter()
             .map(|p| {
                 let base = p.to_lowercase();
-                if hom.tem_regra(&base) {
-                    hom.desambiguar(&base, &texto_processado)
+                let chave = match base.split('-').next() {
+                    Some(primeira) if !primeira.is_empty() => primeira.to_string(),
+                    _ => base.clone(),
+                };
+                if hom.tem_regra(&chave) {
+                    hom.desambiguar(&chave, &texto_processado)
                         .map(|d| d.sentido)
                 } else {
                     None
@@ -1413,7 +1420,7 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         vec![None; palavras.len()]
     };
 
-    // PASSE 2 — fonemização
+    // PASSE 2 — fonemização.
     let mut partes: Vec<String> = Vec::new();
     let mut indice_palavra = 0;
 
@@ -1457,13 +1464,22 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
                 .collect();
             let ipa_sub: Vec<String> = subpalavras
                 .iter()
-                .map(|w| {
+                .enumerate()
+                .map(|(k, w)| {
+                    // O sentido anotado refere-se ao primeiro subword.
+                    // Os clíticos subsequentes (`me`, `o`, `lhe`, ...) não
+                    // têm sentido no léxico de homógrafos.
+                    let sub_sentido = if k == 0 { sentido } else { None };
                     if modo_isolado {
                         resolver_palavra_isolada(w, None, opcoes.lexico)
                     } else {
                         resolver_palavra_contexto(
-                            w, None, opcoes.lexico, opcoes.lexico_contexto,
-                            opcoes.homografos, None,
+                            w,
+                            None,
+                            opcoes.lexico,
+                            opcoes.lexico_contexto,
+                            opcoes.homografos,
+                            sub_sentido,
                         )
                     }
                 })
