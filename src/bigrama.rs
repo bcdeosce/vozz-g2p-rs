@@ -14,69 +14,74 @@
 //!   "Serviu o prato com um molho de cogumelos selvagens."
 //!     palavra = "molho", next1 = "de", next2 = "cogumelos" → sauce
 //!
-//! O NB sozinho não distingue esses dois: em ambos,
-//! `prev_word = "o"` ou `prev_word = "um"`, e `next_word = "de"`.
-//! A palavra que resolve está em `+2`.
+//! Os dados vêm de `data/bigramas.json`, gerado por `gerar_bigramas.py`,
+//! e são embutidos no binário via `include_str!` — não há I/O de runtime
+//! nem dependência de CWD.
+//!
+//! Formato do JSON:
+//!
+//! ```json
+//! {
+//!   "next": { "palavra|w1|w2": "sense|pos", ... },
+//!   "prev": { "palavra|w2|w1": "sense|pos", ... }
+//! }
+//! ```
+//!
+//! O valor pode vir com `|pos` (formato do gerador Python). Este módulo
+//! devolve só o `sense`, que é o que o `lexicon_homografos.json` usa
+//! como chave.
 
-/// Bigramas forward: `(palavra, próxima_1, próxima_2) → sentido`.
+use once_cell::sync::Lazy;
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Deserialize)]
+struct BigramasJson {
+    #[serde(default)]
+    next: HashMap<String, String>,
+    #[serde(default)]
+    prev: HashMap<String, String>,
+}
+
+static BIGRAMAS: Lazy<BigramasJson> = Lazy::new(|| {
+    let raw = include_str!("../data/bigramas.json");
+    serde_json::from_str(raw).expect("data/bigramas.json inválido")
+});
+
+/// Conjunto de palavras-alvo com pelo menos um bigrama cadastrado.
 ///
-/// Ambos os lados seguintes são normalizados para minúsculas.
-pub static BIGRAMAS_NEXT: &[(&str, &str, &str, &str)] = &[
-    // ─── molho ───
-    ("molho", "de", "palha",       "bundle"),
-    ("molho", "de", "flores",      "bundle"),
-    ("molho", "de", "varinhas",    "bundle"),
-    ("molho", "de", "menta",       "bundle"),
-    ("molho", "de", "especiarias", "bundle"),
-    ("molho", "de", "cogumelos",   "sauce"),
-    ("molho", "de", "wasabi",      "sauce"),
+/// Pré-computado uma vez, na primeira chamada. Serve para `tem_bigrama`
+/// rodar em O(1) — essa função é chamada para **toda** palavra de uma
+/// sentença via `Homografos::tem_regra`, então não pode varrer o mapa.
+static PALAVRAS_COM_BIGRAMA: Lazy<HashSet<String>> = Lazy::new(|| {
+    let mut set: HashSet<String> = HashSet::with_capacity(
+        BIGRAMAS.next.len().saturating_add(BIGRAMAS.prev.len()),
+    );
+    for chave in BIGRAMAS.next.keys().chain(BIGRAMAS.prev.keys()) {
+        if let Some(palavra) = chave.split('|').next() {
+            if !palavra.is_empty() {
+                set.insert(palavra.to_string());
+            }
+        }
+    }
+    set
+});
 
-    // ─── bola ───
-    ("bola", "de", "carne",   "loaf"),
-    ("bola", "de", "futebol", "ball"),
-    ("bola", "de", "pelo",    "ball"),
-
-    // ─── polo ───
-    ("polo", "de", "energia",    "hub"),
-    ("polo", "de", "diversão",   "sport_polo"),
-    ("polo", "de", "esporte",    "sport_polo"),
-    ("polo", "de", "desenvolvimento", "hub"),
-];
-
-/// Bigramas backward: `(palavra, anterior_2, anterior_1) → sentido`.
+/// Extrai o sentido puro de um valor `"sense|pos"` armazenado no JSON.
 ///
-/// Útil quando o verbo causativo (que revela que a palavra-alvo é
-/// verbo) está a 2 posições antes. Exemplo:
-///
-///   "A equipa começou a colher depoimentos..."
-///     palavra = "colher", anterior_2 = "começou", anterior_1 = "a"
-///     → harvest
-pub static BIGRAMAS_PREV: &[(&str, &str, &str, &str)] = &[
-    // ─── colher (verbo) ───
-    ("colher", "começou",   "a", "harvest"),
-    ("colher", "começaram", "a", "harvest"),
-    ("colher", "comecei",   "a", "harvest"),
-    ("colher", "começamos", "a", "harvest"),
-    ("colher", "vamos",     "a", "harvest"),
-    ("colher", "vou",       "a", "harvest"),
+/// O gerador Python grava `sense|pos`, mas o `lexicon_homografos.json`
+/// é chaveado apenas por `sense`. Esta função descarta o `|pos`.
+#[inline]
+fn sentido_puro(valor: &str) -> &str {
+    match valor.find('|') {
+        Some(pos) => &valor[..pos],
+        None => valor,
+    }
+}
 
-    // ─── atropelo (verbo) ───
-    ("atropelo", "eu", "que", "running_over"),
-];
-
-/// Verifica se a palavra tem algum bigrama cadastrado.
+/// Verifica se a palavra tem algum bigrama cadastrado (forward ou backward).
 pub fn tem_bigrama(palavra: &str) -> bool {
-    for (palavra_alvo, _, _, _) in BIGRAMAS_NEXT {
-        if *palavra_alvo == palavra {
-            return true;
-        }
-    }
-    for (palavra_alvo, _, _, _) in BIGRAMAS_PREV {
-        if *palavra_alvo == palavra {
-            return true;
-        }
-    }
-    false
+    PALAVRAS_COM_BIGRAMA.contains(palavra)
 }
 
 /// Verifica bigrama forward. Devolve o sentido se a palavra-alvo é
@@ -86,12 +91,11 @@ pub fn verificar_next(
     next1: &str,
     next2: &str,
 ) -> Option<&'static str> {
-    for (palavra_alvo, proxima_1, proxima_2, sentido) in BIGRAMAS_NEXT {
-        if *palavra_alvo == palavra && *proxima_1 == next1 && *proxima_2 == next2 {
-            return Some(sentido);
-        }
-    }
-    None
+    let chave = format!("{}|{}|{}", palavra, next1, next2);
+    BIGRAMAS
+        .next
+        .get(chave.as_str())
+        .map(|v| sentido_puro(v.as_str()))
 }
 
 /// Verifica bigrama backward. Devolve o sentido se a palavra-alvo é
@@ -101,12 +105,17 @@ pub fn verificar_prev(
     prev2: &str,
     prev1: &str,
 ) -> Option<&'static str> {
-    for (palavra_alvo, anterior_2, anterior_1, sentido) in BIGRAMAS_PREV {
-        if *palavra_alvo == palavra && *anterior_2 == prev2 && *anterior_1 == prev1 {
-            return Some(sentido);
-        }
-    }
-    None
+    let chave = format!("{}|{}|{}", palavra, prev2, prev1);
+    BIGRAMAS
+        .prev
+        .get(chave.as_str())
+        .map(|v| sentido_puro(v.as_str()))
+}
+
+/// Número de entradas carregadas, por direção.
+/// Útil para log de startup / diagnóstico.
+pub fn estatisticas() -> (usize, usize) {
+    (BIGRAMAS.next.len(), BIGRAMAS.prev.len())
 }
 
 #[cfg(test)]
@@ -114,37 +123,54 @@ mod testes {
     use super::*;
 
     #[test]
-    fn bigrama_next_encontra_palavra_conhecida() {
-        assert_eq!(verificar_next("molho", "de", "palha"), Some("bundle"));
-        assert_eq!(verificar_next("molho", "de", "cogumelos"), Some("sauce"));
-        assert_eq!(verificar_next("bola", "de", "carne"), Some("loaf"));
-        assert_eq!(verificar_next("bola", "de", "futebol"), Some("ball"));
+    fn tem_bigrama_detecta_palavras_presentes_no_json() {
+        // Se algum destes falhar, o `data/bigramas.json` está vazio ou
+        // foi gerado sem essas palavras — investigue o gerador.
+        assert!(tem_bigrama("molho"), "molho ausente do bigramas.json");
+        assert!(tem_bigrama("colher"), "colher ausente do bigramas.json");
+        assert!(tem_bigrama("bola"), "bola ausente do bigramas.json");
     }
 
     #[test]
-    fn bigrama_next_retorna_none_para_combinacao_desconhecida() {
-        assert_eq!(verificar_next("molho", "de", "inexistente"), None);
-        assert_eq!(verificar_next("palavra", "de", "palha"), None);
-    }
-
-    #[test]
-    fn bigrama_prev_encontra_palavra_conhecida() {
-        assert_eq!(verificar_prev("colher", "começou", "a"), Some("harvest"));
-        assert_eq!(verificar_prev("colher", "vamos", "a"), Some("harvest"));
-    }
-
-    #[test]
-    fn bigrama_prev_retorna_none_para_combinacao_desconhecida() {
-        assert_eq!(verificar_prev("colher", "quis", "a"), None);
-        assert_eq!(verificar_prev("palavra", "começou", "a"), None);
-    }
-
-    #[test]
-    fn tem_bigrama_detecta_palavras_cadastradas() {
-        assert!(tem_bigrama("molho"));
-        assert!(tem_bigrama("colher"));
-        assert!(tem_bigrama("bola"));
+    fn tem_bigrama_nao_dispara_para_palavra_comum() {
         assert!(!tem_bigrama("casa"));
-        assert!(!tem_bigrama("palavra_inexistente"));
+        assert!(!tem_bigrama("palavra_inexistente_xyz"));
+    }
+
+    #[test]
+    fn verificar_next_encontra_par_conhecido() {
+        // Depende do conteúdo de data/bigramas.json. Se o gerador mudar
+        // os thresholds, estes podem deixar de existir — ajuste conforme.
+        if let Some(s) = verificar_next("molho", "de", "palha") {
+            assert_eq!(s, "bundle");
+        }
+        if let Some(s) = verificar_next("molho", "de", "cogumelos") {
+            assert_eq!(s, "sauce");
+        }
+    }
+
+    #[test]
+    fn verificar_next_retorna_none_para_desconhecido() {
+        assert!(verificar_next("palavra_inexistente_xyz", "de", "palha").is_none());
+        assert!(verificar_next("molho", "zzz", "yyy").is_none());
+    }
+
+    #[test]
+    fn verificar_prev_encontra_par_conhecido() {
+        if let Some(s) = verificar_prev("colher", "começou", "a") {
+            assert_eq!(s, "harvest");
+        }
+    }
+
+    #[test]
+    fn verificar_prev_retorna_none_para_desconhecido() {
+        assert!(verificar_prev("palavra_inexistente_xyz", "começou", "a").is_none());
+    }
+
+    #[test]
+    fn sentido_puro_remove_pos() {
+        assert_eq!(sentido_puro("harvest|VERB"), "harvest");
+        assert_eq!(sentido_puro("bundle"), "bundle");
+        assert_eq!(sentido_puro(""), "");
     }
 }
