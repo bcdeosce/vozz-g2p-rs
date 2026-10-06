@@ -2,24 +2,72 @@
 //!
 //! Porte de `index.js` do Vozz, com correções alinhadas ao espeak-ng pt-br.
 //!
-//! Ordem de decisão em modo contexto (2+ palavras):
+//! Regras de nasalização:
 //!
-//! 0. Sentido anotado pelo BCDE-tagger → `lexicon_homografos.json`
+//! | Vogal | Antes de coda m/n | Antes de nasal no onset (m/n/nh) |
+//! |-------|-------------------|----------------------------------|
+//! | `a`/`â`| `ɐ̃`              | `ɐ̃` (tônico, ou pré-tônico antes de `nh`) / `æ` (pré-tônico antes de `m`/`n`) |
+//! | `e`   | `eɪ`              | `e` puro                          |
+//! | `i`   | `i` puro          | `i` puro                          |
+//! | `o`   | `o` puro          | `o` puro                          |
+//! | `u`   | `ũ`               | `ũ` (tônico, ou antes de `nh`)     |
+//!
+//! Ditongo crescente (`i`/`u` + vogal forte):
+//!
+//! - Sílaba tônica → hiato.
+//! - Segunda vogal com acento gráfico → hiato forçado.
+//! - Consoante palatalizável (`c`/`g`/`d`/`t` brando) antes do `i` → hiato.
+//!
+//! Acentuação:
+//!
+//! - `-is`/`-us` final de verbo → oxítona.
+//! - `-om`/`-um` final (2+ sílabas) → oxítona.
+//! - `-irdes` final → tônica no `i`.
+//! - Prefixo `sobre-` (4+ sílabas) → sem acento secundário inicial.
+//!
+//! Notação (aplicada em `limpar`, apenas em valores gerados por regras):
+//!
+//! - `y` final após `tʃ`/`dʒ`/`ʒ` → `j`.
+//! - `ʊ` final após `ʃ`/`ʒ`/`z` → `w`.
+//!
+//! Modos de operação (detecção automática por contagem de palavras):
+//!
+//! **Isolado (1 palavra):**
+//!
+//! 1. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
+//! 2. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
+//! 3. `palavra_para_ipa` (regras)
+//!
+//! **Contexto (2+ palavras):**
+//!
+//! 0. Homógrafo anotado pelo BCDE-tagger (`sense` + `lexicon_homografos.json`)
 //! 1. `buscar_clitico_contexto` (`data/lexicon_contexto.json`)
 //! 2. `buscar_lexico_contexto` (`data/lexicon_contexto.json`)
-//! 3. `lexicon_espeak_contexto.json`
-//! 4. `lexicon_espeak.json`
+//! 3. `lexicon_espeak_contexto.json` (via `OpcoesFonemizar::lexico_contexto`)
+//! 4. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
 //! 5. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
 //! 6. `palavra_para_ipa` (regras)
 //!
-//! Em modo isolado (1 palavra): `buscar_lexico` → `buscar_clitico` →
-//! `lexicon_espeak.json` → `palavra_para_ipa`.
+//! Sândi (aplicado em ambos os modos):
+//!
+//! - `s` final antes de vogal ou consoante sonora → `z`.
+//! - `z` final antes de consoante surda ou fim de sentença → `s`.
+//! - `r` final antes de vogal → `ɾ` (tepe intervocálico).
+//! - `ɾ` final antes de consoante ou fim → `r` (vibrante em coda).
+//! - `ʊ`/`y` final antes de vogal → `w`/`j` — **apenas** quando o valor
+//!   não veio de um léxico contextual curado.
+//!
+//! Homógrafos (`lexicon_homografos.json`):
+//!
+//! - O IPA armazenado é a **forma base** (sem sândi de glide, sem
+//!   dessonorização, sem tap). Aplicam-se todos os sândis sobre ele.
+//! - O sentido é anotado pelo BCDE-tagger antes da fonemização.
 
 use crate::lexicon_contexto::{buscar_clitico_contexto, buscar_lexico_contexto};
 use crate::lexicon_homografos::LexiconHomografos;
 use crate::lexicon_palavra::{buscar_clitico, buscar_lexico};
 use crate::normalize::{normalizar, OpcoesNormalizar};
-use crate::tagger::{self, Tagger};
+use crate::tagger::Tagger;
 use crate::trema;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -43,6 +91,7 @@ const DIGRAFOS: [&str; 5] = ["ch", "lh", "nh", "rr", "ss"];
 const OBSTRUINTES: &str = "pbtdkgfvc";
 const NASALIZAVEIS: [&str; 3] = ["m", "n", "nh"];
 
+/// Consoantes que palatalizam antes de `i`/`e` brando.
 const PALATALIZAVEIS: [&str; 4] = ["c", "g", "d", "t"];
 
 const RADICAIS_KS: &[&str] = &[
@@ -56,10 +105,13 @@ const RADICAIS_KS: &[&str] = &[
 
 const EXCECOES_KS: [&str; 2] = ["sext", "anexim"];
 
+/// Palavras que devem receber sândi de glide mesmo quando o valor
+/// base veio de léxico contextual curado.
 const GLIDE_FORCAR: &[&str] = &[
     "de", "se", "me", "tive", "onde", "disso", "adicionado",
 ];
 
+/// Palavras que nunca recebem sândi de glide.
 const GLIDE_BLOQUEAR: &[&str] = &["que"];
 
 fn ajuste_especifico(palavra: &str, ipa: String, proxima_inicial: Option<char>) -> String {
@@ -176,8 +228,8 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
     let mut unidades: Vec<Unidade> = Vec::new();
     let mut indice = 0;
 
-    // Computa uma vez por palavra. O próprio `u_pronunciado` já
-    // retorna cedo se a palavra não contém `q` nem `g`.
+    // Decide uma vez por palavra. `u_pronunciado` já retorna cedo
+    // se a palavra não contém `q` nem `g`.
     let u_pronunciado = trema::u_pronunciado(palavra);
 
     while indice < caracteres.len() {
@@ -199,10 +251,7 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
         };
         let proximo_apos_par = caracteres.get(indice + 2).copied();
 
-        // `gu`:
-        //   - antes de a/o: sempre glide → gw
-        //   - antes de e/i: decide pelo trema hipotético
-        //   - antes de u:  não é dígrafo (ex.: "pergunta")
+        // `gu`: antes de a/o sempre glide; antes de e/i decide pelo trema.
         if par == "gu" {
             match proximo_apos_par {
                 Some('a') | Some('o') => {
@@ -227,9 +276,7 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
             }
         }
 
-        // `qu`:
-        //   - antes de a/o: sempre glide → kw
-        //   - antes de e/i: decide pelo trema hipotético
+        // `qu`: antes de a/o sempre glide; antes de e/i decide pelo trema.
         if par == "qu" {
             match proximo_apos_par {
                 Some('a') | Some('o') => {
@@ -1145,13 +1192,17 @@ static RE_ESPACOS_MULTIPLOS: Lazy<Regex> =
 static RE_ESPACO_ANTES_PONTUACAO: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\s+([;:,.!?…])").unwrap());
 
+/// Opções de fonemização.
+///
+/// `lexico` é o JSON principal do espeak (`lexicon_espeak.json`).
+/// `lexico_contexto` é o JSON contextual (`lexicon_espeak_contexto.json`).
+/// `homografos` é o léxico `(palavra, sentido) → IPA`.
+/// `tagger` é o wrapper do BCDE-tagger (subprocesso).
 pub struct OpcoesFonemizar<'a> {
     pub normalizar: bool,
     pub lexico: Option<&'a HashMap<String, String>>,
     pub lexico_contexto: Option<&'a HashMap<String, String>>,
-    /// Mapa `(palavra, sentido) → IPA`.
     pub homografos: Option<&'a LexiconHomografos>,
-    /// Tagger BCDE. Em modo isolado é ignorado.
     pub tagger: Option<&'a Tagger>,
 }
 
@@ -1326,43 +1377,47 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     //
     // O tagger recebe a sentença inteira e devolve tokens com `sense`.
     // Mapeamos cada palavra tokenizada pelo g2p para o `sense`
-    // correspondente, preservando ordem de aparição para casos de
-    // repetição (ex.: duas ocorrências de "sede").
-    let anotacoes: Vec<Option<String>> = if let (Some(tagger), false) =
+    // correspondente, preservando ordem de aparição para repetições.
+    let anotacoes: Vec<Option<String>> = if let (Some(t), false) =
         (opcoes.tagger, modo_isolado)
     {
-        let tokens_tagger = tagger::anotar(tagger, &texto_processado);
-
-        let mut por_palavra: HashMap<String, Vec<String>> = HashMap::new();
-        for t in &tokens_tagger {
-            if let Some(sense) = &t.sense {
-                por_palavra
-                    .entry(t.word.to_lowercase())
-                    .or_default()
-                    .push(sense.clone());
+        match t.tag(&texto_processado) {
+            Ok(tokens_tagger) => {
+                let mut por_palavra: HashMap<String, Vec<String>> = HashMap::new();
+                for tok in &tokens_tagger {
+                    if let Some(sense) = &tok.sense {
+                        por_palavra
+                            .entry(tok.word.to_lowercase())
+                            .or_default()
+                            .push(sense.clone());
+                    }
+                }
+                let mut contador: HashMap<String, usize> = HashMap::new();
+                palavras
+                    .iter()
+                    .map(|p| {
+                        let base = p.to_lowercase();
+                        let chave = base
+                            .split('-')
+                            .next()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or(&base)
+                            .to_string();
+                        let idx = contador.entry(chave.clone()).or_insert(0);
+                        let sentido = por_palavra
+                            .get(&chave)
+                            .and_then(|v| v.get(*idx))
+                            .cloned();
+                        *idx += 1;
+                        sentido
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                eprintln!("[tagger] erro: {}", e);
+                vec![None; palavras.len()]
             }
         }
-        let mut contador: HashMap<String, usize> = HashMap::new();
-
-        palavras
-            .iter()
-            .map(|p| {
-                let base = p.to_lowercase();
-                let chave = base
-                    .split('-')
-                    .next()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&base)
-                    .to_string();
-                let idx = contador.entry(chave.clone()).or_insert(0);
-                let sentido = por_palavra
-                    .get(&chave)
-                    .and_then(|v| v.get(*idx))
-                    .cloned();
-                *idx += 1;
-                sentido
-            })
-            .collect()
     } else {
         vec![None; palavras.len()]
     };
@@ -1559,6 +1614,10 @@ fn aplicar_sandi_glide(ipa: String, proxima_inicial: Option<char>) -> String {
 pub fn phonemize(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     fonemizar(texto, opcoes)
 }
+
+/* ------------------------------------------------------------------ *
+ * Testes
+ * ------------------------------------------------------------------ */
 
 #[cfg(test)]
 mod testes {
