@@ -1,20 +1,21 @@
 //! Wrapper sobre o binário BCDE-tagger (subprocesso persistente).
 //!
-//! O BCDE-tagger é compilado como binário separado. Este wrapper inicia
-//! o processo e comunica via stdin/stdout, uma frase por linha.
+//! O BCDE-tagger é compilado como binário separado (não expõe `[lib]`).
+//! Este wrapper inicia o processo uma vez e comunica via stdin/stdout,
+//! uma frase por linha. O tagger devolve os tokens anotados e uma
+//! linha vazia marca o fim da frase.
 //!
-//! O binário é procurado em:
-//!   1. variável de ambiente `BCDE_TAGGER_BIN` (caminho completo)
-//!   2. `bcde-tagger` no PATH
+//! Variáveis de ambiente:
 //!
-//! O diretório de dados é passado como primeiro argumento do binário.
-//! Pode ser configurado via `BCDE_TAGGER_DATA` (padrão: `data`).
+//! - `BCDE_TAGGER_BIN`  — caminho do binário (default: `bcde-tagger` no PATH).
+//! - `BCDE_TAGGER_DATA` — diretório de dados passado como 1º argumento.
 
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::rc::Rc;
 
+/// Token anotado pelo tagger.
 #[derive(Debug, Clone)]
 pub struct Token {
     pub word: String,
@@ -31,16 +32,15 @@ struct Subprocesso {
     stdout: BufReader<ChildStdout>,
 }
 
+/// Handle clonável sobre o subprocesso. `tag` recebe `&self` para
+/// simplificar o uso em `OpcoesFonemizar`.
 #[derive(Clone)]
 pub struct Tagger {
     inner: Rc<RefCell<Subprocesso>>,
 }
 
 impl Tagger {
-    /// Inicia o binário BCDE-tagger.
-    ///
-    /// `data_dir` é o diretório que contém os JSONs do tagger
-    /// (`tabelas_v3.json`, `crf_weights.json`, etc.).
+    /// Inicia o binário BCDE-tagger apontando para `data_dir`.
     pub fn load(data_dir: &str) -> Result<Self, String> {
         let bin = std::env::var("BCDE_TAGGER_BIN")
             .unwrap_or_else(|_| "bcde-tagger".to_string());
@@ -63,7 +63,10 @@ impl Tagger {
         })
     }
 
-    /// Anota uma frase. Devolve os tokens com POS, diacrítico e sentido.
+    /// Anota uma frase inteira.
+    ///
+    /// Envia a frase e lê tokens até encontrar uma linha vazia (fim
+    /// de resposta) ou EOF.
     pub fn tag(&self, texto: &str) -> Result<Vec<Token>, String> {
         let mut sub = self.inner.borrow_mut();
 
@@ -78,10 +81,10 @@ impl Tagger {
                 .read_line(&mut linha)
                 .map_err(|e| e.to_string())?;
             if n == 0 {
-                break; // EOF
+                break;
             }
             if linha.trim().is_empty() {
-                break; // fim da frase
+                break;
             }
             if let Some(tok) = parse_linha(&linha) {
                 tokens.push(tok);
@@ -91,6 +94,8 @@ impl Tagger {
     }
 }
 
+/// Parser tolerante: aceita `word\tupos` seguido de campos opcionais
+/// no formato `chave=valor` (ex.: `diac=...\tsense=...\tvia=...`).
 fn parse_linha(linha: &str) -> Option<Token> {
     let partes: Vec<&str> = linha.trim().split('\t').collect();
     if partes.len() < 2 {
