@@ -10,7 +10,7 @@
 //! {"action":"process_batch","words":["casa","banana",...],"voice":"","overrides":{}}
 //! ```
 //!
-//! `process`        → IPA puro (String), compatível com outros projetos.
+//! `process`        → IPA puro (String), compatibilidade com outros projetos.
 //! `process_piper`  → tokens do Piper (Vec<String> por sentença).
 
 use serde::Serialize;
@@ -30,7 +30,11 @@ use vozz_g2p_rs::tagger::{self, Tagger};
 
 const SLOW_THRESHOLD_MS: u128 = 50;
 
-const BUILD_ID: &str = "2024-11-tagger-trema-piper-v1";
+const BUILD_ID: &str = "2024-11-bcde-lib-trema-piper-v1";
+
+// ---------------------------------------------------------------------------
+// Estado global
+// ---------------------------------------------------------------------------
 
 struct Estado {
     lexicon_base: Arc<HashMap<String, String>>,
@@ -57,6 +61,10 @@ impl Estado {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Formato de resposta
+// ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
 struct RespostaOk {
@@ -97,6 +105,10 @@ struct RespostaBatch {
     total: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Carregamento de léxicos
+// ---------------------------------------------------------------------------
+
 fn carregar_json_seguro(path: &Option<String>) -> HashMap<String, String> {
     let Some(p) = path.as_deref() else {
         return HashMap::new();
@@ -125,7 +137,9 @@ fn rebuild_cache(estado: &mut Estado) {
         for (k, v) in voice_lex.iter() {
             merged.insert(k.clone(), v.clone());
         }
-        estado.lexicon_cached.insert(voice.clone(), Arc::new(merged));
+        estado
+            .lexicon_cached
+            .insert(voice.clone(), Arc::new(merged));
     }
 
     for (voice, voice_lex) in &estado.lexicon_voices_contexto {
@@ -180,6 +194,7 @@ fn get_lexicons_for(
     (Arc::new(merged_iso), Arc::new(merged_ctx))
 }
 
+/// Caminhos padrão onde procurar um arquivo com o nome dado.
 fn caminhos_arquivo(nome: &str) -> Vec<PathBuf> {
     let mut caminhos = Vec::new();
 
@@ -235,48 +250,56 @@ fn carregar_homografos_lexico() -> Option<(LexiconHomografos, PathBuf)> {
     }
 }
 
-/// Procura o diretório `data/` do BCDE-tagger.
-fn caminhos_tagger() -> Vec<PathBuf> {
-    let mut caminhos = Vec::new();
+// ---------------------------------------------------------------------------
+// Tagger (via lib do BCDE-tagger)
+// ---------------------------------------------------------------------------
 
-    if let Ok(caminho) = std::env::var("BCDE_TAGGER_DATA") {
-        if !caminho.is_empty() {
-            caminhos.push(PathBuf::from(caminho));
+fn caminhos_tagger_data() -> Vec<String> {
+    let mut v = Vec::new();
+
+    if let Ok(p) = std::env::var("BCDE_TAGGER_DATA") {
+        if !p.is_empty() {
+            v.push(p);
         }
     }
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            caminhos.push(dir.join("data"));
-            caminhos.push(dir.join("bcde-tagger").join("data"));
+            v.push(
+                dir.join("../BCDE-tagger/data")
+                    .to_string_lossy()
+                    .to_string(),
+            );
+            v.push(dir.join("data").to_string_lossy().to_string());
         }
     }
 
-    caminhos.push(PathBuf::from("data"));
-    caminhos.push(PathBuf::from("../BCDE-tagger/data"));
-    caminhos.push(PathBuf::from("cache"));
-
-    caminhos
+    v.push("/content/BCDE-tagger/data".to_string());
+    v.push("data".to_string());
+    v
 }
 
 fn carregar_tagger() -> Option<Tagger> {
-    for caminho in caminhos_tagger() {
-        if !caminho.is_dir() {
+    for data in caminhos_tagger_data() {
+        if !std::path::Path::new(&data).is_dir() {
             continue;
         }
-        match tagger::carregar_tagger(&caminho) {
+        match tagger::carregar_tagger(&data) {
             Ok(t) => {
-                eprintln!("[tagger] BCDE carregado de {}", caminho.display());
+                eprintln!("[tagger] BCDE carregado de {}", data);
                 return Some(t);
             }
             Err(erro) => {
-                eprintln!("[tagger] falha em {}: {}", caminho.display(), erro);
-                continue;
+                eprintln!("[tagger] falha em {}: {}", data, erro);
             }
         }
     }
     None
 }
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
 
 fn handle_set_lexicon(estado: &mut Estado, req: &Value) {
     let t0 = Instant::now();
@@ -389,8 +412,16 @@ fn opcoes_para<'a>(
 fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
     let t0 = Instant::now();
 
-    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let text = req
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let voice = req
+        .get("voice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let overrides = extrair_overrides(req);
 
     let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
@@ -441,8 +472,16 @@ fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
 }
 
 fn handle_process_piper(estado: &Estado, req: &Value) -> RespostaProcessoPiper {
-    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let text = req
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let voice = req
+        .get("voice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let overrides = extrair_overrides(req);
 
     let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
@@ -521,6 +560,10 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
         total,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Loop principal
+// ---------------------------------------------------------------------------
 
 fn main() {
     let mut estado = Estado::novo();
