@@ -1,38 +1,17 @@
 //! Worker persistente: recebe JSON via stdin, devolve JSON via stdout.
 //!
-//! Protocolo idêntico ao `phonemizer_worker.mjs` do Vozz, mais uma ação
-//! extra `process_batch` para processar muitas palavras de uma vez.
-//!
 //! Ações:
 //!
 //! ```json
 //! {"action":"version"}
 //! {"action":"set_lexicon","base_path":"...","global_path":"...","voice_paths":{...},"context_path":"..."}
 //! {"action":"process","text":"...","voice":"idoso","overrides":{...}}
+//! {"action":"process_piper","text":"...","voice":"idoso","overrides":{...}}
 //! {"action":"process_batch","words":["casa","banana",...],"voice":"","overrides":{}}
 //! ```
 //!
-//! Pipeline de `process`:
-//!
-//! 1. `normalizar(texto)`          (Vozz)
-//! 2. `dividir_em_sentencas(norm)` (Vozz)
-//! 3. `fonemizar(s, { lexico, lexico_contexto, homografos })` (Vozz)
-//!
-//! Pipeline de `process_batch`:
-//!
-//! 1. Para cada palavra, `precisa_normalizar` → `normalizar` (se preciso).
-//! 2. `fonemizar(palavra, { lexico })`.
-//! 3. Devolve um mapa `{ palavra: ipa }` e o tempo interno em ms.
-//!
-//! Léxicos automáticos carregados na inicialização:
-//!
-//! - `lexico_espeak.json`          → base (modo isolado)
-//! - `lexico_espeak_contexto.json` → contexto (modo sentença)
-//! - `homograph_rules_v2.json`     → regras do classificador NB
-//! - `lexicon_homografos.json`     → mapa `(palavra, sentido) → IPA`
-//!
-//! Os dois últimos são combinados em um único `Homografos`. O bigrama
-//! contextual é interno ao `Homografos` (módulo `bigrama`).
+//! `process`        → IPA puro (String), compatível com outros projetos.
+//! `process_piper`  → tokens do Piper (Vec<String> por sentença).
 
 use serde::Serialize;
 use serde_json::Value;
@@ -43,34 +22,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vozz_g2p_rs::g2p::{fonemizar, OpcoesFonemizar};
-use vozz_g2p_rs::homografos::Homografos;
+use vozz_g2p_rs::lexicon_homografos::LexiconHomografos;
 use vozz_g2p_rs::normalize::{normalizar, precisa_normalizar, OpcoesNormalizar};
+use vozz_g2p_rs::piper::ipa_para_piper;
 use vozz_g2p_rs::splitter::dividir_em_sentencas;
+use vozz_g2p_rs::tagger::{self, Tagger};
 
 const SLOW_THRESHOLD_MS: u128 = 50;
 
-/// Identificador de build. Muda a cada alteração do protocolo.
-const BUILD_ID: &str = "2024-11-batch-v6-bigramas";
-
-// ---------------------------------------------------------------------------
-// Estado global
-// ---------------------------------------------------------------------------
+const BUILD_ID: &str = "2024-11-tagger-trema-piper-v1";
 
 struct Estado {
-    /// Léxico base (modo isolado).
     lexicon_base: Arc<HashMap<String, String>>,
-    /// Léxico contextual (modo sentença).
     lexicon_base_contexto: Arc<HashMap<String, String>>,
-    /// Overrides por voz (modo isolado).
     lexicon_voices: HashMap<String, Arc<HashMap<String, String>>>,
-    /// Overrides por voz (modo contexto).
     lexicon_voices_contexto: HashMap<String, Arc<HashMap<String, String>>>,
-    /// Cache: base + override de voz (modo isolado).
     lexicon_cached: HashMap<String, Arc<HashMap<String, String>>>,
-    /// Cache: base + override de voz (modo contexto).
     lexicon_cached_contexto: HashMap<String, Arc<HashMap<String, String>>>,
-    /// Desambiguador de homógrafos (NB + bigramas + expressões fixas).
-    homografos: Option<Homografos>,
+    homografos: Option<LexiconHomografos>,
+    tagger: Option<Tagger>,
 }
 
 impl Estado {
@@ -83,13 +53,10 @@ impl Estado {
             lexicon_cached: HashMap::new(),
             lexicon_cached_contexto: HashMap::new(),
             homografos: None,
+            tagger: None,
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Formato de resposta
-// ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
 struct RespostaOk {
@@ -113,15 +80,22 @@ struct Sentenca {
 }
 
 #[derive(Serialize)]
+struct RespostaProcessoPiper {
+    sentences: Vec<SentencaPiper>,
+}
+
+#[derive(Serialize)]
+struct SentencaPiper {
+    text: String,
+    phonemes: Vec<String>,
+}
+
+#[derive(Serialize)]
 struct RespostaBatch {
     phonemes: HashMap<String, String>,
     timing_ms: u128,
     total: usize,
 }
-
-// ---------------------------------------------------------------------------
-// Carregamento de léxicos
-// ---------------------------------------------------------------------------
 
 fn carregar_json_seguro(path: &Option<String>) -> HashMap<String, String> {
     let Some(p) = path.as_deref() else {
@@ -151,9 +125,7 @@ fn rebuild_cache(estado: &mut Estado) {
         for (k, v) in voice_lex.iter() {
             merged.insert(k.clone(), v.clone());
         }
-        estado
-            .lexicon_cached
-            .insert(voice.clone(), Arc::new(merged));
+        estado.lexicon_cached.insert(voice.clone(), Arc::new(merged));
     }
 
     for (voice, voice_lex) in &estado.lexicon_voices_contexto {
@@ -175,7 +147,6 @@ fn rebuild_cache(estado: &mut Estado) {
     );
 }
 
-/// Devolve `(lexico_isolado, lexico_contexto)` para a voz/overrides dados.
 fn get_lexicons_for(
     estado: &Estado,
     voice: &str,
@@ -209,8 +180,6 @@ fn get_lexicons_for(
     (Arc::new(merged_iso), Arc::new(merged_ctx))
 }
 
-/// Caminhos padrão onde procurar um arquivo com o nome dado.
-/// A variável de ambiente é derivada do nome em maiúsculas.
 fn caminhos_arquivo(nome: &str) -> Vec<PathBuf> {
     let mut caminhos = Vec::new();
 
@@ -235,7 +204,6 @@ fn caminhos_arquivo(nome: &str) -> Vec<PathBuf> {
     caminhos
 }
 
-/// Tenta carregar um arquivo. Devolve o caminho carregado e o mapa.
 fn carregar_arquivo(nome: &str) -> Option<(PathBuf, HashMap<String, String>)> {
     for caminho in caminhos_arquivo(nome) {
         if !caminho.is_file() {
@@ -254,20 +222,12 @@ fn carregar_arquivo(nome: &str) -> Option<(PathBuf, HashMap<String, String>)> {
     None
 }
 
-/// Carrega as regras NB + o léxico `(palavra, sentido) → IPA`.
-///
-/// Devolve também os caminhos usados, para logging.
-fn carregar_homografos() -> Option<(Homografos, PathBuf, PathBuf)> {
-    let regras_path = caminhos_arquivo("homograph_rules_v2.json")
+fn carregar_homografos_lexico() -> Option<(LexiconHomografos, PathBuf)> {
+    let path = caminhos_arquivo("lexicon_homografos.json")
         .into_iter()
         .find(|p| p.is_file())?;
-
-    let lexico_path = caminhos_arquivo("lexicon_homografos.json")
-        .into_iter()
-        .find(|p| p.is_file())?;
-
-    match Homografos::from_paths(&regras_path, &lexico_path) {
-        Ok(h) => Some((h, regras_path, lexico_path)),
+    match LexiconHomografos::from_path(&path) {
+        Ok(l) => Some((l, path)),
         Err(erro) => {
             eprintln!("[homografos] erro: {}", erro);
             None
@@ -275,9 +235,48 @@ fn carregar_homografos() -> Option<(Homografos, PathBuf, PathBuf)> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------
+/// Procura o diretório `data/` do BCDE-tagger.
+fn caminhos_tagger() -> Vec<PathBuf> {
+    let mut caminhos = Vec::new();
+
+    if let Ok(caminho) = std::env::var("BCDE_TAGGER_DATA") {
+        if !caminho.is_empty() {
+            caminhos.push(PathBuf::from(caminho));
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            caminhos.push(dir.join("data"));
+            caminhos.push(dir.join("bcde-tagger").join("data"));
+        }
+    }
+
+    caminhos.push(PathBuf::from("data"));
+    caminhos.push(PathBuf::from("../BCDE-tagger/data"));
+    caminhos.push(PathBuf::from("cache"));
+
+    caminhos
+}
+
+fn carregar_tagger() -> Option<Tagger> {
+    for caminho in caminhos_tagger() {
+        if !caminho.is_dir() {
+            continue;
+        }
+        match tagger::carregar_tagger(&caminho) {
+            Ok(t) => {
+                eprintln!("[tagger] BCDE carregado de {}", caminho.display());
+                return Some(t);
+            }
+            Err(erro) => {
+                eprintln!("[tagger] falha em {}: {}", caminho.display(), erro);
+                continue;
+            }
+        }
+    }
+    None
+}
 
 fn handle_set_lexicon(estado: &mut Estado, req: &Value) {
     let t0 = Instant::now();
@@ -344,16 +343,14 @@ fn handle_set_lexicon(estado: &mut Estado, req: &Value) {
     rebuild_cache(estado);
     let t_end = Instant::now();
 
-    let n_base = estado.lexicon_base.len();
-    let n_base_ctx = estado.lexicon_base_contexto.len();
-    let n_voices = estado.lexicon_voices.len();
-    let n_voices_ctx = estado.lexicon_voices_contexto.len();
-    let n_cached = estado.lexicon_cached.len();
-    let n_cached_ctx = estado.lexicon_cached_contexto.len();
-
     eprintln!(
         "[lexicon] base={} | contexto={} | vozes={} (+{} contexto) | cache={}/{}",
-        n_base, n_base_ctx, n_voices, n_voices_ctx, n_cached, n_cached_ctx
+        estado.lexicon_base.len(),
+        estado.lexicon_base_contexto.len(),
+        estado.lexicon_voices.len(),
+        estado.lexicon_voices_contexto.len(),
+        estado.lexicon_cached.len(),
+        estado.lexicon_cached_contexto.len()
     );
     eprintln!(
         "[lexicon-timing] ler={}ms rebuild_cache={}ms total={}ms",
@@ -363,21 +360,8 @@ fn handle_set_lexicon(estado: &mut Estado, req: &Value) {
     );
 }
 
-fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
-    let t0 = Instant::now();
-
-    let text = req
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let voice = req
-        .get("voice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let overrides: HashMap<String, String> = req
-        .get("overrides")
+fn extrair_overrides(req: &Value) -> HashMap<String, String> {
+    req.get("overrides")
         .and_then(|v| v.as_object())
         .map(|objeto| {
             objeto
@@ -385,7 +369,29 @@ fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
                 .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn opcoes_para<'a>(
+    estado: &'a Estado,
+    lexico: &'a HashMap<String, String>,
+    lexico_contexto: &'a HashMap<String, String>,
+) -> OpcoesFonemizar<'a> {
+    OpcoesFonemizar {
+        normalizar: false,
+        lexico: Some(lexico),
+        lexico_contexto: Some(lexico_contexto),
+        homografos: estado.homografos.as_ref(),
+        tagger: estado.tagger.as_ref(),
+    }
+}
+
+fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
+    let t0 = Instant::now();
+
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let overrides = extrair_overrides(req);
 
     let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
     let t_lex = Instant::now();
@@ -399,12 +405,7 @@ fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
     let mut sentences: Vec<Sentenca> = Vec::with_capacity(sentencas.len());
     for s in &sentencas {
         let ts = Instant::now();
-        let opcoes = OpcoesFonemizar {
-            normalizar: false,
-            lexico: Some(lexico.as_ref()),
-            lexico_contexto: Some(lexico_contexto.as_ref()),
-            homografos: estado.homografos.as_ref(),
-        };
+        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
         let phon = fonemizar(s, &opcoes);
         let dt = ts.elapsed().as_millis();
 
@@ -439,6 +440,30 @@ fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
     RespostaProcesso { sentences }
 }
 
+fn handle_process_piper(estado: &Estado, req: &Value) -> RespostaProcessoPiper {
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let overrides = extrair_overrides(req);
+
+    let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
+
+    let normalizado = normalizar(&text, OpcoesNormalizar::default());
+    let sentencas = dividir_em_sentencas(&normalizado);
+
+    let mut sentences: Vec<SentencaPiper> = Vec::with_capacity(sentencas.len());
+    for s in &sentencas {
+        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
+        let ipa = fonemizar(s, &opcoes);
+        let tokens = ipa_para_piper(&ipa);
+        sentences.push(SentencaPiper {
+            text: s.to_string(),
+            phonemes: tokens,
+        });
+    }
+
+    RespostaProcessoPiper { sentences }
+}
+
 fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
     let voz = requisicao
         .get("voice")
@@ -446,19 +471,7 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
         .unwrap_or("")
         .to_string();
 
-    let overrides: HashMap<String, String> = requisicao
-        .get("overrides")
-        .and_then(|valor| valor.as_object())
-        .map(|objeto| {
-            objeto
-                .iter()
-                .filter_map(|(chave, valor)| {
-                    valor.as_str().map(|texto| (chave.clone(), texto.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
+    let overrides = extrair_overrides(requisicao);
     let (lexico, lexico_contexto) = get_lexicons_for(estado, &voz, &overrides);
 
     let palavras: Vec<String> = requisicao
@@ -484,13 +497,7 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
             palavra.clone()
         };
 
-        let opcoes = OpcoesFonemizar {
-            normalizar: false,
-            lexico: Some(lexico.as_ref()),
-            lexico_contexto: Some(lexico_contexto.as_ref()),
-            homografos: estado.homografos.as_ref(),
-        };
-
+        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
         let fonema = fonemizar(&entrada, &opcoes);
         fonemas.insert(palavra.clone(), fonema);
     }
@@ -515,14 +522,9 @@ fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Loop principal
-// ---------------------------------------------------------------------------
-
 fn main() {
     let mut estado = Estado::novo();
 
-    // Léxico base (modo isolado).
     if let Some((caminho, lexico)) = carregar_arquivo("lexico_espeak.json") {
         eprintln!(
             "[lexicon] auto-carregado base: {} ({} entradas)",
@@ -534,7 +536,6 @@ fn main() {
         eprintln!("[lexicon] nenhum lexico_espeak.json encontrado");
     }
 
-    // Léxico contextual (modo sentença).
     if let Some((caminho, lexico)) = carregar_arquivo("lexico_espeak_contexto.json") {
         eprintln!(
             "[lexicon] auto-carregado contexto: {} ({} entradas)",
@@ -546,21 +547,20 @@ fn main() {
         eprintln!("[lexicon] nenhum lexico_espeak_contexto.json encontrado");
     }
 
-    // Homógrafos (NB + bigramas + expressões fixas).
-    if let Some((h, r_path, l_path)) = carregar_homografos() {
+    if let Some((hom, path)) = carregar_homografos_lexico() {
         eprintln!(
-            "[homografos] regras: {} | lexicon: {} palavras",
-            h.regras.len(),
-            h.lexico.len()
+            "[homografos] lexicon carregado: {} ({} palavras)",
+            path.display(),
+            hom.len()
         );
-        eprintln!(
-            "[homografos] arquivos: {} + {}",
-            r_path.display(),
-            l_path.display()
-        );
-        estado.homografos = Some(h);
+        estado.homografos = Some(hom);
     } else {
-        eprintln!("[homografos] nenhum par regras+lexicon encontrado");
+        eprintln!("[homografos] lexicon_homografos.json não encontrado");
+    }
+
+    match carregar_tagger() {
+        Some(t) => estado.tagger = Some(t),
+        None => eprintln!("[tagger] BCDE-tagger NÃO carregado — sentidos virão vazios"),
     }
 
     rebuild_cache(&mut estado);
@@ -604,9 +604,10 @@ fn main() {
                 "features": [
                     "set_lexicon",
                     "process",
+                    "process_piper",
                     "process_batch",
-                    "homografos",
-                    "bigramas",
+                    "tagger",
+                    "trema",
                 ],
             }))
             .unwrap_or_else(|_| "{\"build\":\"unknown\"}".to_string()),
@@ -619,6 +620,12 @@ fn main() {
 
             "process" => {
                 let r = handle_process(&estado, &req);
+                serde_json::to_string(&r)
+                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
+            }
+
+            "process_piper" => {
+                let r = handle_process_piper(&estado, &req);
                 serde_json::to_string(&r)
                     .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
             }
