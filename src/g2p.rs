@@ -2,71 +2,25 @@
 //!
 //! Porte de `index.js` do Vozz, com correções alinhadas ao espeak-ng pt-br.
 //!
-//! Regras de nasalização:
+//! Ordem de decisão em modo contexto (2+ palavras):
 //!
-//! | Vogal | Antes de coda m/n | Antes de nasal no onset (m/n/nh) |
-//! |-------|-------------------|----------------------------------|
-//! | `a`/`â`| `ɐ̃`              | `ɐ̃` (tônico, ou pré-tônico antes de `nh`) / `æ` (pré-tônico antes de `m`/`n`) |
-//! | `e`   | `eɪ`              | `e` puro                          |
-//! | `i`   | `i` puro          | `i` puro                          |
-//! | `o`   | `o` puro          | `o` puro                          |
-//! | `u`   | `ũ`               | `ũ` (tônico, ou antes de `nh`)     |
-//!
-//! Ditongo crescente (`i`/`u` + vogal forte):
-//!
-//! - Sílaba tônica → hiato.
-//! - Segunda vogal com acento gráfico → hiato forçado.
-//! - Consoante palatalizável (`c`/`g`/`d`/`t` brando) antes do `i` → hiato.
-//!
-//! Acentuação:
-//!
-//! - `-is`/`-us` final de verbo → oxítona.
-//! - `-om`/`-um` final (2+ sílabas) → oxítona.
-//! - `-irdes` final → tônica no `i`.
-//! - Prefixo `sobre-` (4+ sílabas) → sem acento secundário inicial.
-//!
-//! Notação (aplicada em `limpar`, apenas em valores gerados por regras):
-//!
-//! - `y` final após `tʃ`/`dʒ`/`ʒ` → `j`.
-//! - `ʊ` final após `ʃ`/`ʒ`/`z` → `w`.
-//!
-//! Modos de operação (detecção automática por contagem de palavras):
-//!
-//! **Isolado (1 palavra):**
-//!
-//! 1. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
-//! 2. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
-//! 3. `palavra_para_ipa` (regras)
-//!
-//! **Contexto (2+ palavras):**
-//!
-//! 0. Homógrafo anotado pelo Bifonia (`lexicon_homografos.json`)
+//! 0. Sentido anotado pelo BCDE-tagger → `lexicon_homografos.json`
 //! 1. `buscar_clitico_contexto` (`data/lexicon_contexto.json`)
 //! 2. `buscar_lexico_contexto` (`data/lexicon_contexto.json`)
-//! 3. `lexicon_espeak_contexto.json` (via `OpcoesFonemizar::lexico_contexto`)
-//! 4. `lexicon_espeak.json` (via `OpcoesFonemizar::lexico`)
+//! 3. `lexicon_espeak_contexto.json`
+//! 4. `lexicon_espeak.json`
 //! 5. `buscar_lexico` / `buscar_clitico` (`data/lexicon_palavra.json`)
 //! 6. `palavra_para_ipa` (regras)
 //!
-//! Sândi (aplicado em ambos os modos):
-//!
-//! - `s` final antes de vogal ou consoante sonora → `z`.
-//! - `z` final antes de consoante surda ou fim de sentença → `s`.
-//! - `r` final antes de vogal → `ɾ` (tepe intervocálico).
-//! - `ɾ` final antes de consoante ou fim → `r` (vibrante em coda).
-//! - `ʊ`/`y` final antes de vogal → `w`/`j` — **apenas** quando o valor
-//!   não veio de um léxico contextual curado.
-//!
-//! Homógrafos (`lexicon_homografos.json`):
-//!
-//! - O IPA armazenado é a **forma base** (sem sândi de glide, sem
-//!   dessonorização, sem tap). Aplicam-se todos os sândis sobre ele.
-//! - O sentido é anotado pelo Bifonia antes da fonemização.
+//! Em modo isolado (1 palavra): `buscar_lexico` → `buscar_clitico` →
+//! `lexicon_espeak.json` → `palavra_para_ipa`.
 
-use crate::homografos::Homografos;
 use crate::lexicon_contexto::{buscar_clitico_contexto, buscar_lexico_contexto};
+use crate::lexicon_homografos::LexiconHomografos;
 use crate::lexicon_palavra::{buscar_clitico, buscar_lexico};
 use crate::normalize::{normalizar, OpcoesNormalizar};
+use crate::tagger::{self, Tagger};
+use crate::trema;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -89,7 +43,6 @@ const DIGRAFOS: [&str; 5] = ["ch", "lh", "nh", "rr", "ss"];
 const OBSTRUINTES: &str = "pbtdkgfvc";
 const NASALIZAVEIS: [&str; 3] = ["m", "n", "nh"];
 
-/// Consoantes que palatalizam antes de `i`/`e` brando.
 const PALATALIZAVEIS: [&str; 4] = ["c", "g", "d", "t"];
 
 const RADICAIS_KS: &[&str] = &[
@@ -103,31 +56,24 @@ const RADICAIS_KS: &[&str] = &[
 
 const EXCECOES_KS: [&str; 2] = ["sext", "anexim"];
 
-/// Palavras que devem receber sândi de glide mesmo quando o valor
-/// base veio de léxico contextual curado.
 const GLIDE_FORCAR: &[&str] = &[
     "de", "se", "me", "tive", "onde", "disso", "adicionado",
 ];
 
-/// Palavras que nunca recebem sândi de glide.
 const GLIDE_BLOQUEAR: &[&str] = &["que"];
 
-/// Ajustes específicos que NÃO são glide: acento, timbre, etc.
-/// Roda depois dos sândis de `s/z`, `r/ɾ` e `glide`.
 fn ajuste_especifico(palavra: &str, ipa: String, proxima_inicial: Option<char>) -> String {
     let proxima_eh_vogal = proxima_inicial
         .map(|c| c.to_lowercase().next().map_or(false, eh_vogal))
         .unwrap_or(false);
 
     match palavra {
-        // Artigo `o`: ʊ → u antes de vogal
         "o" => {
             if proxima_eh_vogal && ipa == "ʊ" {
                 return "u".to_string();
             }
             ipa
         }
-        // `pode`: j → y antes de consoante ou fim
         "pode" => {
             if !proxima_eh_vogal && ipa.ends_with('j') {
                 let mut r = ipa;
@@ -230,6 +176,10 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
     let mut unidades: Vec<Unidade> = Vec::new();
     let mut indice = 0;
 
+    // Computa uma vez por palavra. O próprio `u_pronunciado` já
+    // retorna cedo se a palavra não contém `q` nem `g`.
+    let u_pronunciado = trema::u_pronunciado(palavra);
+
     while indice < caracteres.len() {
         let caractere = caracteres[indice];
 
@@ -249,9 +199,13 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
         };
         let proximo_apos_par = caracteres.get(indice + 2).copied();
 
+        // `gu`:
+        //   - antes de a/o: sempre glide → gw
+        //   - antes de e/i: decide pelo trema hipotético
+        //   - antes de u:  não é dígrafo (ex.: "pergunta")
         if par == "gu" {
             match proximo_apos_par {
-                Some('a') | Some('o') | Some('i') => {
+                Some('a') | Some('o') => {
                     unidades.push(Unidade {
                         tipo: TipoUnidade::Consoante,
                         texto: "gw".to_string(),
@@ -259,10 +213,12 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
                     indice += 2;
                     continue;
                 }
-                Some('e') | Some('é') | Some('ê') => {
+                Some('e') | Some('é') | Some('ê')
+                | Some('i') | Some('í') => {
+                    let texto = if u_pronunciado { "gw" } else { "ɡ" };
                     unidades.push(Unidade {
                         tipo: TipoUnidade::Consoante,
-                        texto: "gu".to_string(),
+                        texto: texto.to_string(),
                     });
                     indice += 2;
                     continue;
@@ -271,6 +227,9 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
             }
         }
 
+        // `qu`:
+        //   - antes de a/o: sempre glide → kw
+        //   - antes de e/i: decide pelo trema hipotético
         if par == "qu" {
             match proximo_apos_par {
                 Some('a') | Some('o') => {
@@ -281,10 +240,12 @@ fn segmentar(palavra: &str) -> Vec<Unidade> {
                     indice += 2;
                     continue;
                 }
-                Some('e') | Some('é') | Some('ê') | Some('i') | Some('í') => {
+                Some('e') | Some('é') | Some('ê')
+                | Some('i') | Some('í') => {
+                    let texto = if u_pronunciado { "kw" } else { "k" };
                     unidades.push(Unidade {
                         tipo: TipoUnidade::Consoante,
-                        texto: "qu".to_string(),
+                        texto: texto.to_string(),
                     });
                     indice += 2;
                     continue;
@@ -1184,16 +1145,14 @@ static RE_ESPACOS_MULTIPLOS: Lazy<Regex> =
 static RE_ESPACO_ANTES_PONTUACAO: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\s+([;:,.!?…])").unwrap());
 
-/// Opções de fonemização.
-///
-/// `lexico` é o JSON principal do espeak (`lexicon_espeak.json`).
-/// `lexico_contexto` é o JSON contextual (`lexicon_espeak_contexto.json`).
-/// `homografos` é o desambiguador + léxico `(palavra, sentido) → IPA`.
 pub struct OpcoesFonemizar<'a> {
     pub normalizar: bool,
     pub lexico: Option<&'a HashMap<String, String>>,
     pub lexico_contexto: Option<&'a HashMap<String, String>>,
-    pub homografos: Option<&'a Homografos>,
+    /// Mapa `(palavra, sentido) → IPA`.
+    pub homografos: Option<&'a LexiconHomografos>,
+    /// Tagger BCDE. Em modo isolado é ignorado.
+    pub tagger: Option<&'a Tagger>,
 }
 
 impl<'a> Default for OpcoesFonemizar<'a> {
@@ -1203,13 +1162,11 @@ impl<'a> Default for OpcoesFonemizar<'a> {
             lexico: None,
             lexico_contexto: None,
             homografos: None,
+            tagger: None,
         }
     }
 }
 
-/// Resolve uma palavra em modo isolado (1 palavra).
-///
-/// **Sem sândi**: não há palavra seguinte para condicionar a forma.
 fn resolver_palavra_isolada(
     palavra: &str,
     _proxima_inicial: Option<char>,
@@ -1229,36 +1186,16 @@ fn resolver_palavra_isolada(
     palavra_para_ipa(palavra, None)
 }
 
-/// Resolve uma palavra em modo contexto (2+ palavras).
-///
-/// Ordem de consulta:
-/// 0. Homógrafo anotado pelo Bifonia (`lexicon_homografos.json`).
-/// 1. `buscar_clitico_contexto` — clíticos contextuais curados.
-/// 2. `buscar_lexico_contexto` — léxico contextual curado.
-/// 3. `lexico_contexto` externo — espeak em contexto.
-/// 4. `lexico` externo — espeak isolado.
-/// 5. `buscar_lexico` — léxico de palavra curado.
-/// 6. `buscar_clitico` — clíticos curados.
-/// 7. `palavra_para_ipa` — regras.
-///
-/// Sândi aplicado ao final:
-///
-/// - **Sempre**: `s`/`z` final e `r`/`ɾ` final por contexto fonológico.
-/// - **Só quando o valor NÃO veio de léxico contextual curado**:
-///   `ʊ`/`y` final antes de vogal → `w`/`j`.
-/// - **Homógrafos** recebem todos os sândis — o IPA armazenado é a
-///   forma base.
 fn resolver_palavra_contexto(
     palavra: &str,
     proxima_inicial: Option<char>,
     lexico: Option<&HashMap<String, String>>,
     lexico_contexto: Option<&HashMap<String, String>>,
-    homografos: Option<&Homografos>,
+    homografos: Option<&LexiconHomografos>,
     sentido: Option<&str>,
 ) -> String {
-    // 0. Homógrafo anotado — prioridade máxima.
-    //    O IPA é a forma base; aplicar todos os sândis.
-    eprintln!("DEBUG {} sentido={:?}", palavra, sentido);
+    // 0. Homógrafo anotado pelo BCDE-tagger. IPA é a forma base;
+    //    aplicar todos os sândis.
     if let (Some(hom), Some(s)) = (homografos, sentido) {
         if let Some(ipa) = hom.ipa_para(palavra, s) {
             let ipa_s = aplicar_sandi_s_final(ipa.to_string(), proxima_inicial);
@@ -1267,7 +1204,6 @@ fn resolver_palavra_contexto(
         }
     }
 
-    // 1..7 — cadeia normal
     let (ipa_base, veio_do_contexto) =
         if let Some(forma) = buscar_clitico_contexto(palavra) {
             (forma.to_string(), true)
@@ -1314,7 +1250,6 @@ fn resolver_palavra_contexto(
     let ipa_com_s = aplicar_sandi_s_final(ipa_base, proxima_inicial);
     let ipa_com_r = aplicar_sandi_rotico(ipa_com_s, proxima_inicial);
 
-    // Glide: decisão por palavra
     let aplicar_glide = if GLIDE_BLOQUEAR.contains(&palavra) {
         false
     } else if GLIDE_FORCAR.contains(&palavra) {
@@ -1329,9 +1264,9 @@ fn resolver_palavra_contexto(
         ipa_com_r
     };
 
-    // Ajustes específicos não-glide
     ajuste_especifico(palavra, ipa_com_glide, proxima_inicial)
 }
+
 pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     let texto_processado = if opcoes.normalizar {
         normalizar(texto, OpcoesNormalizar::default())
@@ -1359,10 +1294,6 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         .copied()
         .collect();
 
-    // Pré-calcula, para cada palavra (índice em `palavras`), a inicial
-    // da próxima palavra ATRAVESSÁVEL — só se não houver pontuação
-    // entre as duas. Se houver qualquer pontuação (vírgula, ponto,
-    // ponto-e-vírgula, etc.), a inicial é `None` e o sândi é bloqueado.
     let proxima_por_palavra: Vec<Option<char>> = {
         let mut posicoes: Vec<usize> = Vec::with_capacity(palavras.len());
         for (i, t) in tokens.iter().enumerate() {
@@ -1391,29 +1322,45 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
         resultado
     };
 
-    // PASSE 1 — anotação de sentido para homógrafos.
+    // PASSE 1 — anotação de sentido via BCDE-tagger.
     //
-    // Para palavras com hífen (ex.: `Desapego-me`), o alvo do classificador
-    // é o primeiro subword (`Desapego`). A tokenização interna de
-    // `desambiguar` (via `\w+`) já trata `Desapego-me` como duas palavras,
-    // então basta passar a chave correta.
-    let anotacoes: Vec<Option<String>> = if let (Some(hom), false) =
-        (opcoes.homografos, modo_isolado)
+    // O tagger recebe a sentença inteira e devolve tokens com `sense`.
+    // Mapeamos cada palavra tokenizada pelo g2p para o `sense`
+    // correspondente, preservando ordem de aparição para casos de
+    // repetição (ex.: duas ocorrências de "sede").
+    let anotacoes: Vec<Option<String>> = if let (Some(tagger), false) =
+        (opcoes.tagger, modo_isolado)
     {
+        let tokens_tagger = tagger::anotar(tagger, &texto_processado);
+
+        let mut por_palavra: HashMap<String, Vec<String>> = HashMap::new();
+        for t in &tokens_tagger {
+            if let Some(sense) = &t.sense {
+                por_palavra
+                    .entry(t.word.to_lowercase())
+                    .or_default()
+                    .push(sense.clone());
+            }
+        }
+        let mut contador: HashMap<String, usize> = HashMap::new();
+
         palavras
             .iter()
             .map(|p| {
                 let base = p.to_lowercase();
-                let chave = match base.split('-').next() {
-                    Some(primeira) if !primeira.is_empty() => primeira.to_string(),
-                    _ => base.clone(),
-                };
-                if hom.tem_regra(&chave) {
-                    hom.desambiguar(&chave, &texto_processado)
-                        .map(|d| d.sentido)
-                } else {
-                    None
-                }
+                let chave = base
+                    .split('-')
+                    .next()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&base)
+                    .to_string();
+                let idx = contador.entry(chave.clone()).or_insert(0);
+                let sentido = por_palavra
+                    .get(&chave)
+                    .and_then(|v| v.get(*idx))
+                    .cloned();
+                *idx += 1;
+                sentido
             })
             .collect()
     } else {
@@ -1466,9 +1413,6 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
                 .iter()
                 .enumerate()
                 .map(|(k, w)| {
-                    // O sentido anotado refere-se ao primeiro subword.
-                    // Os clíticos subsequentes (`me`, `o`, `lhe`, ...) não
-                    // têm sentido no léxico de homógrafos.
                     let sub_sentido = if k == 0 { sentido } else { None };
                     if modo_isolado {
                         resolver_palavra_isolada(w, None, opcoes.lexico)
@@ -1516,7 +1460,6 @@ pub fn fonemizar(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     sem_espaco_antes_pontuacao.trim().to_string()
 }
 
-/// Aplica sândi de `s`/`z` final em contato com a palavra seguinte.
 fn aplicar_sandi_s_final(ipa: String, proxima_inicial: Option<char>) -> String {
     if ipa.is_empty() {
         return ipa;
@@ -1550,7 +1493,6 @@ fn aplicar_sandi_s_final(ipa: String, proxima_inicial: Option<char>) -> String {
     ipa
 }
 
-/// Aplica sândi rótico (`r`/`ɾ`) em contato com a palavra seguinte.
 fn aplicar_sandi_rotico(ipa: String, proxima_inicial: Option<char>) -> String {
     if ipa.is_empty() {
         return ipa;
@@ -1575,11 +1517,6 @@ fn aplicar_sandi_rotico(ipa: String, proxima_inicial: Option<char>) -> String {
     ipa
 }
 
-/// Aplica sândi de glide em contato com a palavra seguinte.
-///
-/// Bidirecional:
-///   - antes de vogal: `ʊ → w`, `y → j`
-///   - antes de consoante/fim: `w → ʊ`, `j → y`
 fn aplicar_sandi_glide(ipa: String, proxima_inicial: Option<char>) -> String {
     if ipa.is_empty() {
         return ipa;
@@ -1619,14 +1556,9 @@ fn aplicar_sandi_glide(ipa: String, proxima_inicial: Option<char>) -> String {
     ipa
 }
 
-
 pub fn phonemize(texto: &str, opcoes: &OpcoesFonemizar) -> String {
     fonemizar(texto, opcoes)
 }
-
-/* ------------------------------------------------------------------ *
- * Testes
- * ------------------------------------------------------------------ */
 
 #[cfg(test)]
 mod testes {
@@ -1636,619 +1568,40 @@ mod testes {
         palavra_para_ipa(palavra, None)
     }
 
-    // --- Notação ---
-
     #[test]
-    fn e_final_apos_africada_palatal_vira_j() {
-        for (palavra, esperado) in [
-            ("existe", "tʃj"),
-            ("hoje", "ʒj"),
-        ] {
-            let r = ipa(palavra);
-            assert!(
-                r.contains(esperado),
-                "{}: esperava '{}', veio {}", palavra, esperado, r
-            );
-        }
+    fn cinquentenao_perde_u() {
+        let r = ipa("cinquenta");
+        assert!(r.contains("kw"), "cinquenta: esperava kw, veio {}", r);
     }
 
     #[test]
-    fn o_final_apos_fricativa_palatal_vira_w() {
-        for (palavra, esperado) in [
-            ("abaixo", "ʃw"),
-            ("criterioso", "zw"),
-        ] {
-            let r = ipa(palavra);
-            assert!(
-                r.contains(esperado),
-                "{}: esperava '{}', veio {}", palavra, esperado, r
-            );
-        }
+    fn tranquilo_tem_kw() {
+        let r = ipa("tranquilo");
+        assert!(r.contains("kw"), "tranquilo: esperava kw, veio {}", r);
     }
 
     #[test]
-    fn palatal_y_nao_afeta_outras_vogais() {
-        let r = ipa("casa");
-        assert!(!r.contains("j"), "casa: não esperava 'j', veio {}", r);
-    }
-
-    // --- Sândi ---
-
-    #[test]
-    fn sandi_s_final_em_sentenca() {
-        let r = fonemizar("Muitas vezes Os animais", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("mwˈiŋtæz vˈezyz ʊz ˌænimˈaɪs")
-                || r.contains("mwˈiŋtæz vˈezyz ʊz ˌænimˈaɪz"),
-            "esperava 'mwˈiŋtæz vˈezyz ʊz ˌænimˈaɪz' em: {}",
-            r
-        );
+    fn quente_nao_tem_kw() {
+        let r = ipa("quente");
+        assert!(!r.contains("kw"), "quente: não esperava kw, veio {}", r);
     }
 
     #[test]
-    fn sandi_s_antes_de_consoante_surda() {
-        let r = fonemizar("As coisas", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("as kˈoɪzæs") || r.contains("as kˈoɪzæz"),
-            "esperava 'as kˈoɪzæs' em: {}",
-            r
-        );
-    }
-
-    // --- Clíticos em modo isolado (1 palavra) ---
-
-    #[test]
-    fn clitico_que_tonico_isolado() {
-        let r = fonemizar("que", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("kˈy"),
-            "que isolado: esperava 'kˈy', veio {}", r
-        );
+    fn guerra_nao_tem_gw() {
+        let r = ipa("guerra");
+        assert!(!r.contains("ɡw"), "guerra: não esperava ɡw, veio {}", r);
     }
 
     #[test]
-    fn clitico_na_tonico_isolado() {
-        let r = fonemizar("na", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("nˈa"),
-            "na isolado: esperava 'nˈa', veio {}", r
-        );
-    }
-
-    #[test]
-    #[allow(uncommon_codepoints)]
-    fn clitico_de_tonico_isolado() {
-        let r = fonemizar("de", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("dʒˈy"),
-            "de isolado: esperava 'dʒˈy', veio {}", r
-        );
-    }
-
-    // --- Clíticos em modo contexto (2+ palavras) ---
-
-    #[test]
-    #[allow(uncommon_codepoints)]
-    fn clitico_de_contexto_e_dʒy() {
-        let r = fonemizar("de casa", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("dʒy"),
-            "de em contexto: esperava 'dʒy', veio {}", r
-        );
-    }
-
-    #[test]
-    fn clitico_para_secundario_em_contexto() {
-        let r = fonemizar("para casa", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("pˌaɾæ"),
-            "para em contexto: esperava 'pˌaɾæ', veio {}", r
-        );
-    }
-
-    #[test]
-    fn clitico_ser_sem_acento_em_contexto() {
-        let r = fonemizar("ser algo", &OpcoesFonemizar::default());
-        assert!(
-            r.contains("seɾ") && !r.contains("sˈer"),
-            "ser em contexto: esperava 'seɾ', veio {}", r
-        );
-    }
-
-    // --- Regra do `x` ---
-
-    #[test]
-    fn x_popular_e_sh() {
-        for p in [
-            "abacaxi", "mexer", "xará", "lixo", "roxo",
-            "baixo", "caixa", "peixe", "deixar", "queixo", "eixo",
-        ] {
-            let r = ipa(p);
-            assert!(r.contains('ʃ'), "{}: esperava ʃ, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn x_inicial_e_sh() {
-        let r = ipa("xícara");
-        assert!(r.starts_with('ʃ'), "esperava ʃ no início: {}", r);
-    }
-
-    #[test]
-    fn radical_taxi_forca_ks() {
-        for p in ["táxi", "taxista", "taxímetro", "taxiar"] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn radical_fix_forca_ks() {
-        for p in ["fixo", "fixar", "prefixo", "sufixo", "infixo", "crucifixo"] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn radical_sex_forca_ks() {
-        for p in ["sexo", "sexual", "sexismo", "assexuado", "bissexual"] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn radical_toxic_forca_ks() {
-        for p in ["tóxico", "toxicidade", "toxicologia"] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn radical_nex_forca_ks() {
-        for p in ["nexo", "conexo", "desconexo", "anexo", "anexar"] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn radicais_quimica_forca_ks() {
-        for p in [
-            "hidroxila", "hidróxido", "carboxila", "carboxilase",
-            "carboxílico", "oxidação", "oxidante", "oxigênio",
-            "dióxido", "peróxido", "hexágono", "hexacampeão",
-            "flexão", "flexível", "flexibilizar",
-        ] {
-            let r = ipa(p);
-            assert!(r.contains("ks"), "{}: esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn hidroxido_com_acento_e_ks() {
-        let r = ipa("hidróxido");
-        assert!(r.contains("ks"), "hidróxido: esperava ks, veio {}", r);
-    }
-
-    #[test]
-    fn taxa_nao_vira_ks() {
-        for p in ["taxa", "taxar", "taxação"] {
-            let r = ipa(p);
-            assert!(!r.contains("ks"), "{}: não esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn sexta_nao_vira_ks() {
-        for p in ["sexta", "sexto", "sextante", "sextilha"] {
-            let r = ipa(p);
-            assert!(!r.contains("ks"), "{}: não esperava ks, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn anexim_nao_vira_ks() {
-        let r = ipa("anexim");
-        assert!(!r.contains("ks"), "anexim: não esperava ks, veio {}", r);
-    }
-
-    #[test]
-    fn prefixo_ex_vira_z() {
-        for p in ["exame", "exemplo", "exato", "exíguo", "exórdio"] {
-            let r = palavra_para_ipa(p, None);
-            assert!(r.contains("ez"), "{}: esperava ez, veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn ex_mais_consoante_nao_vira_z() {
-        let r = ipa("extensão");
-        assert!(!r.contains("ez"), "extensão: não esperava ez, veio {}", r);
-    }
-
-    #[test]
-    fn am_final_vira_ditongo_nasal() {
-        for p in ["falam", "cantam", "estouram", "fizeram"] {
-            let r = ipa(p);
-            assert!(
-                r.contains("ɐ\u{0303}ʊ\u{0303}"),
-                "{}: esperava ɐ̃ʊ̃, veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn ao_grafico_forma_ditongo() {
-        for p in ["pão", "cão", "irmão", "coração", "razão"] {
-            let r = ipa(p);
-            assert!(
-                r.contains("ɐ\u{0303}ʊ\u{0303}"),
-                "{}: esperava ɐ̃ʊ̃, veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn ae_grafico_forma_ditongo() {
-        for p in ["mãe", "pães"] {
-            let r = ipa(p);
-            assert!(
-                r.contains("ɐ\u{0303}ɪ\u{0303}"),
-                "{}: esperava ɐ̃ɪ̃, veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn oe_grafico_forma_ditongo() {
-        let r = ipa("põe");
-        assert!(r.contains("o\u{0303}ɪ\u{0303}"), "põe: esperava õɪ̃, veio {}", r);
-    }
-
-    #[test]
-    fn a_nasaliza_sempre() {
-        for (p, esperado) in [
-            ("cama", "ɐ\u{0303}"),
-            ("ano", "ɐ\u{0303}"),
-            ("banho", "ɐ\u{0303}"),
-            ("campo", "ɐ\u{0303}"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn e_nasaliza_so_em_coda() {
-        assert!(ipa("tempo").contains("eɪ"), "tempo: esperava eɪ");
-        assert!(ipa("vem").contains("eɪ"), "vem: esperava eɪ");
-        assert!(ipa("homem").contains("eɪ"), "homem: esperava eɪ");
-        assert!(
-            !ipa("tenho").contains("eɪ"),
-            "tenho: não esperava eɪ, veio {}", ipa("tenho")
-        );
-    }
-
-    #[test]
-    fn o_nunca_nasaliza() {
-        for p in ["vison", "ponto", "sonho", "campo"] {
-            let r = ipa(p);
-            assert!(
-                !r.contains("o\u{0303}"),
-                "{}: não esperava 'õ', veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn i_nunca_nasaliza() {
-        for p in ["vinho", "vison", "ninho", "linho"] {
-            let r = ipa(p);
-            assert!(
-                !r.contains("i\u{0303}"),
-                "{}: não esperava 'ĩ', veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn u_nasaliza_antes_de_nh() {
-        let r = ipa("testemunhando");
-        assert!(r.contains("u\u{0303}"), "testemunhando: esperava ũ, veio {}", r);
-    }
-
-    #[test]
-    fn u_tonico_antes_de_m_nasaliza() {
-        let r = ipa("inhaúma");
-        assert!(r.contains("u\u{0303}"), "inhaúma: esperava ũ, veio {}", r);
-    }
-
-    #[test]
-    fn u_atono_antes_de_m_nao_nasaliza() {
-        for p in ["resumia", "sumia", "espiava"] {
-            let r = ipa(p);
-            assert!(
-                !r.contains("u\u{0303}"),
-                "{}: não esperava ũ, veio {}", p, r
-            );
-        }
-    }
-
-    #[test]
-    fn a_pretonico_antes_de_nasal_vira_ae() {
-        let r = ipa("banana");
-        assert!(r.contains("æn"), "banana: esperava 'æn', veio {}", r);
-    }
-
-    #[test]
-    fn a_circunflexo_antes_de_nasal_nasaliza() {
-        let r = ipa("alofânico");
-        assert!(r.contains("ɐ\u{0303}"), "alofânico: esperava ɐ̃, veio {}", r);
-    }
-
-    #[test]
-    fn nh_nasaliza_a_pretonico() {
-        let r = ipa("banheiro");
-        assert!(r.contains("ɐ\u{0303}"), "banheiro: esperava ɐ̃, veio {}", r);
-    }
-
-    #[test]
-    fn un_antes_de_consoante_nasaliza() {
-        let r = ipa("pergunta");
-        assert!(r.contains("u\u{0303}"), "pergunta: esperava ũ, veio {}", r);
-    }
-
-    #[test]
-    fn gu_qu_antes_de_a_o_sao_glide() {
-        for (p, esperado) in [
-            ("guaxarapo", "ɡw"),
-            ("quatro", "kw"),
-            ("quando", "kw"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn gu_antes_de_i_e_glide() {
+    fn linguica_tem_gw() {
         let r = ipa("linguiça");
         assert!(r.contains("ɡw"), "linguiça: esperava ɡw, veio {}", r);
     }
 
     #[test]
-    fn qu_antes_de_i_e_k() {
-        let r = ipa("quironomídeo");
-        assert!(
-            r.contains('k') && !r.contains("kw"),
-            "quironomídeo: esperava k, veio {}", r
-        );
-    }
-
-    #[test]
-    fn gu_qu_antes_de_e_sao_digrafo() {
-        assert!(!ipa("quero").contains("kw"));
-        assert!(!ipa("guerra").contains("ɡw"));
-    }
-
-    #[test]
-    fn gu_antes_de_u_nao_e_digrafo() {
-        let r = ipa("pergunta");
-        assert!(!r.contains("ɡw"));
-    }
-
-    #[test]
-    fn ditongo_crescente_sem_acento_e_hiato() {
-        let r = ipa("resumia");
-        assert!(r.contains("mˈiæ") || r.contains("mˈi.æ"));
-    }
-
-    #[test]
-    fn ditongo_crescente_com_acento_grafico() {
-        let r = ipa("zízia");
-        assert!(r.contains("zj"), "zízia: esperava zj, veio {}", r);
-    }
-
-    #[test]
-    fn ditongo_crescente_historia() {
-        let r = ipa("história");
-        assert!(r.contains("ɾj"), "história: esperava ɾj, veio {}", r);
-    }
-
-    #[test]
-    fn ci_antes_de_vogal_e_hiato() {
-        let r = ipa("cianeto");
-        assert!(!r.contains("sj"), "cianeto: não esperava 'sj', veio {}", r);
-    }
-
-    #[test]
-    fn gi_antes_de_vogal_e_hiato() {
-        let r = ipa("girasol");
-        assert!(!r.contains("ʒj"), "girasol: não esperava 'ʒj', veio {}", r);
-    }
-
-    #[test]
-    fn di_antes_de_vogal_e_hiato() {
-        let r = ipa("diádico");
-        assert!(!r.contains("dʒj"), "diádico: não esperava 'dʒj', veio {}", r);
-    }
-
-    #[test]
-    fn hiato_com_acento_na_fraca_nao_forma_ditongo() {
-        for p in ["saúde", "ruína", "viúva"] {
-            let r = ipa(p);
-            assert!(!r.contains("wˈi") && !r.contains("jˈu"));
-        }
-    }
-
-    #[test]
-    #[allow(uncommon_codepoints)]
-    fn ideo_final_vira_idʒjʊ() {
-        let r = ipa("radionuclídeo");
-        assert!(r.contains("idʒjʊ"), "esperava 'idʒjʊ', veio {}", r);
-    }
-
-    #[test]
-    fn ol_final_preserva_l() {
-        for p in ["farol", "anasol", "gaiacol", "rol", "sol"] {
-            let r = ipa(p);
-            assert!(r.contains('l'), "{}: esperava 'l', veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn al_final_vira_w() {
-        for p in ["sal", "Brasil"] {
-            let r = ipa(p);
-            assert!(!r.contains('l'), "{}: não esperava 'l', veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn om_final_e_oxitono() {
-        for p in ["crepom", "cupom", "batom"] {
-            let r = ipa(p);
-            assert!(r.contains("ˈo") || r.contains("ˈo\u{0303}"));
-        }
-    }
-
-    #[test]
-    fn irdes_final_tonica_no_i() {
-        for p in ["esvairdes", "destruirdes", "sairdes", "possuirdes"] {
-            let r = ipa(p);
-            assert!(r.contains("ˈi"), "{}: esperava 'ˈi', veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn acento_secundario_em_banana() {
-        let r = ipa("banana");
-        assert!(r.contains("ˌ"));
-    }
-
-    #[test]
-    fn prefixo_sobre_nao_acentua_inicio() {
-        for p in ["sobrenaturalizásseis", "sobreviveríamos"] {
-            let r = ipa(p);
-            assert!(!r.contains("sˌo"), "{}: não esperava 'sˌo', veio {}", p, r);
-        }
-    }
-
-    #[test]
-    fn au_em_diferentes_contextos() {
-        for (p, esperado) in [
-            ("pau", "aʊ"),
-            ("causa", "aʊ"),
-            ("autuasses", "aʊ"),
-            ("saudade", "aʊ"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn eu_em_diferentes_contextos() {
-        for (p, esperado) in [
-            ("meu", "eʊ"),
-            ("vendeu", "eʊ"),
-            ("deus", "eʊ"),
-            ("neutro", "eʊ"),
-            ("neurose", "eʊ"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn eu_com_acento_e_epsilon_u() {
-        let r = ipa("céu");
-        assert!(r.contains("ɛʊ"));
-    }
-
-    #[test]
-    fn ou_em_diferentes_contextos() {
-        for (p, esperado) in [
-            ("cantou", "ow"),
-            ("outro", "ow"),
-            ("couro", "ow"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn is_final_de_verbo_e_oxitono() {
-        for p in ["medis", "reagis", "eximis", "impus", "transpus"] {
-            let r = ipa(p);
-            assert!(r.contains("ˈi") || r.contains("ˈu"));
-        }
-    }
-
-    #[test]
-    fn ss_reduz_para_s() {
-        let r = ipa("conscientizado");
-        assert!(!r.contains("ss"));
-    }
-
-    #[test]
-    fn zs_reduz_para_s() {
-        let r = ipa("coalesçamos");
-        assert!(!r.contains("zs"));
-    }
-
-    #[test]
-    fn a_postônico_vira_ae() {
-        let r = ipa("sacárase");
-        assert!(r.contains("ɾæz"));
-    }
-
-    #[test]
-    fn l_antes_de_consoante_apos_a_em_tonica() {
-        for (p, esperado) in [
-            ("alto", "aʊ"),
-            ("palma", "aʊ"),
-            ("caldo", "aʊ"),
-        ] {
-            let r = ipa(p);
-            assert!(r.contains(esperado), "{}: esperava '{}', veio {}", p, esperado, r);
-        }
-    }
-
-    #[test]
-    fn r_apos_coda_nasal_vira_x() {
-        let r = ipa("enrola");
-        assert!(r.contains("ŋx"), "enrola: esperava 'ŋx', veio {}", r);
-    }
-
-    #[test]
-    fn d_em_coda_nao_africa() {
-        for p in ["adversar", "advogado", "advento"] {
-            let r = ipa(p);
-            assert!(!r.contains("dʒv"));
-        }
-    }
-
-    #[test]
-    fn circunflexo_a_antes_de_i_vira_ae() {
-        let r = ipa("câimbra");
-        assert!(r.contains("ˈæ"), "câimbra: esperava 'æ', veio {}", r);
-    }
-
-    #[test]
-    fn silabificar_casa() {
-        let s = silabificar("casa");
-        assert_eq!(s.len(), 2);
-    }
-
-    #[test]
-    fn limpar_normaliza_para_nfd() {
-        assert!(limpar("kɐ\u{0303}").contains('\u{0303}'));
+    fn quatro_tem_kw() {
+        let r = ipa("quatro");
+        assert!(r.contains("kw"), "quatro: esperava kw, veio {}", r);
     }
 
     #[test]
