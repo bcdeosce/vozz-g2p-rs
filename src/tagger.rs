@@ -1,15 +1,16 @@
-//! Wrapper sobre a API do BCDE-tagger (dependência git).
+//! Wrapper sobre o BCDE-tagger (lib, in-process).
 //!
-//! O crate `bcde-tagger` expõe `[lib] name = "bcde_tagger"`.
-//! Aqui reexportamos `Tagger`, `Token`, `ALL_POS` e oferecemos um
-//! `carregar_tagger` que encapsula `Tagger::load` para o worker.
+//! O crate `bcde-tagger` expõe `Tagger::load(dir)` + `Tagger::tag(texto)`.
+//! Aqui só encapsulamos para o resto do crate não depender dos tipos diretos.
 
-pub use bcde_tagger::{Tagger, Token, ALL_POS};
+pub use bcde_tagger::{Token, Tagger};
 
-/// Carrega o tagger de um diretório de dados.
-///
-/// O BCDE-tagger espera um diretório com `tabelas_v3.json`,
-/// `crf_weights.json`, `diacriticos_table.json`, `resolver_v7.json`.
+/// Carrega o tagger do diretório de dados.
 pub fn carregar_tagger(dir: &str) -> Result<Tagger, String> {
-    Tagger::load(dir).map_err(|e| format!("{:?}", e))
+    Tagger::load(dir).map_err(|e| format!("BCDE-tagger: {:?}", e))
+}
+
+/// Roda o tagger numa sentença.
+pub fn anotar(tagger: &Tagger, texto: &str) -> Vec<Token> {
+    tagger.tag(texto)
 }
