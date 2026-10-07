@@ -1,39 +1,37 @@
+<div align="center">
+
+<img src="BCDE.png" alt="vozz-g2p-rs" width="400"/>
+
 # vozz-g2p-rs
 
-Conversor **grafema→fonema (G2P) para português do Brasil**, escrito em Rust puro, com foco em fidelidade à convenção IPA do `espeak-ng pt-br` — a mesma convenção com que modelos neurais de TTS (Piper, Coqui, VITS) são treinados.
+**Conversor grafema→fonema para português brasileiro.**
 
-Este projeto é um **fork/porte do [Vozz](https://github.com/Pedro21062014/vozz)**, uma biblioteca JavaScript de G2P para pt-BR. O objetivo é ter a mesma qualidade de fonetização em um binário nativo, sem dependência de runtime JS e com performance muito superior.
-
-Esta versão traz **três mudanças estruturais** em relação ao porte inicial:
-
-1. **Desambiguação de homógrafos via [BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger)** — substitui o classificador Naive Bayes + bigramas anterior.
-2. **Regras de trema do Acordo Ortográfico de 1990** — resolve `qu`/`gu` antes de `e`/`i` corretamente.
-3. **Pipeline de síntese para o [Piper](https://github.com/rhasspy/piper)** — saída no alfabeto do modelo, chunking inteligente, controle de pausa e **6 presets de emoção**.
-
----
+G2P em Rust puro, com fidelidade à convenção IPA do `espeak-ng pt-br` — a mesma convenção com que modelos neurais de TTS são treinados.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Fidelity espeak-ng](https://img.shields.io/badge/espeak--ng%20pt--br-97%25-success.svg)]()
 [![Homógrafos](https://img.shields.io/badge/hom%C3%B3grafos-97.7%25-success.svg)]()
-[![Emoções](https://img.shields.io/badge/emo%C3%A7%C3%B5es-6-blueviolet.svg)]()
 
-## Índice
+</div>
 
-- [O que mudou nesta versão](#o-que-mudou-nesta-versão)
+---
+
+## Sumário
+
+- [Sobre](#sobre)
+- [O que mudou](#o-que-mudou)
 - [Motivação](#motivação)
 - [Diferenças em relação ao Vozz original](#diferenças-em-relação-ao-vozz-original)
+- [Ecossistema BCDE](#ecossistema-bcde)
 - [Instalação](#instalação)
 - [Arquivos de dados e léxicos](#arquivos-de-dados-e-léxicos)
 - [Uso como biblioteca Rust](#uso-como-biblioteca-rust)
-- [Uso como worker (CLI)](#uso-como-worker-cli)
-- [Pipeline Piper + emoções](#pipeline-piper--emoções)
-- [Calibração por voz](#calibração-por-voz)
-- [Cliente Python (referência)](#cliente-python-referência)
+- [Uso como worker](#uso-como-worker)
+- [Pipeline Piper](#pipeline-piper)
 - [Comparador Python](#comparador-python)
 - [API pública](#api-pública)
-- [Regras fonológicas implementadas](#regras-fonológicas-implementadas)
+- [Regras fonológicas](#regras-fonológicas)
 - [Testes](#testes)
 - [FAQ](#faq)
 - [Licença](#licença)
@@ -41,22 +39,35 @@ Esta versão traz **três mudanças estruturais** em relação ao porte inicial:
 
 ---
 
-## O que mudou nesta versão
+## Sobre
+
+O `vozz-g2p-rs` é um conversor **grafema→fonema (G2P) para português do Brasil**, escrito em Rust puro, com foco em fidelidade à convenção IPA do `espeak-ng pt-br`.
+
+O projeto é um **fork/porte do [Vozz](https://github.com/Pedro21062014/vozz)**, uma biblioteca JavaScript de G2P para pt-BR. O objetivo é ter a mesma qualidade de fonetização em um binário nativo, sem dependência de runtime JS e com performance muito superior.
+
+Esta versão traz três mudanças estruturais em relação ao porte inicial:
+
+1. **Desambiguação de homógrafos via [BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger)** — substitui o classificador Naive Bayes + bigramas anterior.
+2. **Regras de trema do Acordo Ortográfico de 1990** — resolve `qu`/`gu` antes de `e`/`i` corretamente.
+3. **Pipeline para [Piper](https://github.com/rhasspy/piper)** — saída no alfabeto do modelo + chunking inteligente.
+
+---
+
+## O que mudou
 
 | Área | Antes | Agora |
 |------|-------|-------|
 | Desambiguação de homógrafos | Naive Bayes + bigramas (`homografos.rs`, `bigrama.rs`) | [BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger) via lib |
 | Léxico de homógrafos | `(palavra, sentido) → IPA` dentro do desambiguador | `lexicon_homografos.rs` (mapa puro) |
 | Trema (`qu`/`gu` antes de `e`/`i`) | Não tratado | `trema.rs` com reintrodução hipotética + lista curada |
-| Saída para Piper | Nenhuma | `piper.rs` (tokens) + `piper_pipeline.rs` (chunks + pausas) |
-| Emoções | Nenhuma | 6 presets: `neutro`, `ansioso`, `cansado`, `triste`, `empolgado`, `calmo` |
-| Chunking inteligente | Nenhum | Funde sentenças curtas (≤ 200 chars); fragmenta só acima disso |
-| Pausas por pontuação | Fixas | Base calibrada × fator de emoção |
+| Saída para Piper | Nenhuma | `piper.rs` (tokens) + `piper_pipeline.rs` (chunks) |
+| Chunking inteligente | Nenhum | Funde sentenças curtas; fragmenta só acima de 200 chars |
+| Pipeline de alto nível | Disperso | `pipeline.rs` (`texto_para_chunks`, `texto_para_ipa`) |
 | Actions do worker | `version`, `set_lexicon`, `process`, `process_batch` | + `process_piper`, `process_piper_chunks` |
 
 **Removidos:** `src/homografos.rs`, `src/bigrama.rs`, `data/bigramas.json`, `data/homograph_rules_v2.json`.
 
-**Adicionados:** `src/tagger.rs`, `src/trema.rs`, `src/piper.rs`, `src/piper_pipeline.rs`, `src/lexicon_homografos.rs`, `data/regras_trema.json`.
+**Adicionados:** `src/tagger.rs`, `src/trema.rs`, `src/piper.rs`, `src/piper_pipeline.rs`, `src/pipeline.rs`, `src/lexicon_homografos.rs`, `data/regras_trema.json`.
 
 ---
 
@@ -64,22 +75,22 @@ Esta versão traz **três mudanças estruturais** em relação ao porte inicial:
 
 O [Vozz](https://github.com/Pedro21062014/vozz) é uma biblioteca JS excelente para fonetização pt-BR, mas tem algumas limitações que motivaram este porte:
 
-- **Performance**: o G2P em JS roda a ~21 µs/palavra. Em Rust, o mesmo pipeline roda a ~1,5 µs/palavra (14x mais rápido).
-- **Integração**: um binário nativo é mais fácil de integrar em pipelines Python, C++, Go, ou em servidores de TTS de alta performance.
-- **Precisão**: durante o porte, várias regras foram revisitadas com base em comparação direta contra o `espeak-ng pt-br`, corrigindo bugs do original.
-- **Auditoria**: as regras estão em Rust fortemente tipado, com testes unitários cobrindo cada decisão fonológica.
-- **Homógrafos**: o classificador NB original era bom, mas o BCDE-tagger eleva a acurácia em casos que o NB não pegava (mesmo POS com sentidos distintos).
-- **Piper**: modelos Piper são treinados com a convenção do espeak-ng, mas exigem **segmentação por sentença** e **pausas controladas** para soar natural. Este projeto centraliza toda essa lógica no Rust.
+- **Performance.** O G2P em JS roda a ~21 µs/palavra. Em Rust, o mesmo pipeline roda a ~1,5 µs/palavra (14× mais rápido).
+- **Integração.** Um binário nativo é mais fácil de integrar em pipelines Python, C++, Go ou em servidores de TTS de alta performance.
+- **Precisão.** Durante o porte, várias regras foram revisitadas com base em comparação direta contra o `espeak-ng pt-br`, corrigindo bugs do original.
+- **Auditoria.** As regras estão em Rust fortemente tipado, com testes unitários cobrindo cada decisão fonológica.
+- **Homógrafos.** O classificador NB original era bom, mas o BCDE-tagger eleva a acurácia em casos que o NB não pegava (mesmo POS com sentidos distintos).
+- **Piper.** Modelos Piper são treinados com a convenção do espeak-ng e exigem segmentação por sentença. Este projeto centraliza essa lógica no Rust.
 
 ---
 
 ## Diferenças em relação ao Vozz original
 
-Este não é um porte mecânico. Durante o desenvolvimento, foram identificados e corrigidos vários bugs e divergências do Vozz original em relação ao `espeak-ng pt-br`:
+Este não é um porte mecânico. Durante o desenvolvimento, foram identificados e corrigidos vários bugs e divergências do Vozz original em relação ao `espeak-ng pt-br`.
 
 | Regra | Vozz original | vozz-g2p-rs |
 |-------|---------------|-------------|
-| `x` intervocálico | Sempre `/ʃ/` | `/ʃ/` por padrão; `/ks/` em radicais eruditos (`taxi-`, `fix-`, `hidrox-`, `oxid-`, etc.) |
+| `x` intervocálico | Sempre `/ʃ/` | `/ʃ/` por padrão; `/ks/` em radicais eruditos (`taxi-`, `fix-`, `hidrox-`, `oxid-`) |
 | Prefixo `ex-` + vogal | `/ʃ/` | `/z/` (`exame`, `exemplo`, `exato`) |
 | Acento secundário | Só na 1ª sílaba se tônica na 3ª+ | Múltiplas sílabas (0, 2, 4, ...), alinhado ao espeak |
 | `-am` final de verbo | `ɐ̃ŋ` | `ɐ̃ʊ̃` (`falam`, `cantam`) |
@@ -94,10 +105,20 @@ Este não é um porte mecânico. Durante o desenvolvimento, foram identificados 
 | `c`/`g`/`d`/`t` + `i` + vogal | Ditongo crescente | Hiato (`cianeto`, `girasol`, `diádico`) |
 | `-ídeo` final | `ideʊ` | `idʒjʊ` (`radionuclídeo`) |
 | Prefixo `sobre-` | Acento secundário na 1ª | Átono em palavras de 4+ sílabas |
-| **Trema (novo)** | Não tratado | `cinquenta` → `sĩˈkwẽtɐ` (antes: `sĩˈkẽtɐ`) |
-| **Homógrafo `sede`** | Não desambiguado | `sˈedʒi` (seat) vs `sˈɛdʒi` (thirst) via BCDE |
+| Trema | Não tratado | `cinquenta` → `sĩˈkwẽtɐ` (antes: `sĩˈkẽtɐ`) |
+| Homógrafo `sede` | Não desambiguado | `sˈedʒi` (seat) vs `sˈɛdʒi` (thirst) via BCDE |
 
 O `vozz-g2p-rs` atinge **~90% de fidelidade** contra o `espeak-ng pt-br` no corpus de 336k palavras, contra ~50% do Vozz original.
+
+---
+
+## Ecossistema BCDE
+
+| Projeto | Papel | Licença |
+|---------|-------|:-------:|
+| [`BCDE-tagger`](https://github.com/bcdeosce/BCDE-tagger) | POS tagging + desambiguação de homógrafos | MIT |
+| **`vozz-g2p-rs`** | G2P pt-BR (grafema → fonema) | Apache 2.0 |
+| [`BCDE-piper-vozz-rs`](https://github.com/bcdeosce/BCDE-piper-vozz-rs) | Motor de síntese | MIT |
 
 ---
 
@@ -107,10 +128,10 @@ O `vozz-g2p-rs` atinge **~90% de fidelidade** contra o `espeak-ng pt-br` no corp
 
 - Rust 1.70+ (`rustup` recomendado)
 - (Opcional) `espeak-ng` — só para rodar o comparador Python
-- (Opcional) Node.js 18+ — só para rodar o comparador Python contra o Vozz JS
-- (Opcional) Python 3.10+ — só para os scripts de geração e para o cliente Piper
+- (Opcional) Node.js 18+ — só para o comparador Python contra o Vozz JS
+- (Opcional) Python 3.10+ — só para os scripts de geração
 
-### Como dependência (Cargo.toml)
+### Como dependência
 
 ```toml
 [dependencies]
@@ -152,7 +173,7 @@ O pipeline usa **7 arquivos de dados** em cascata:
 | `data/lexicon_palavra.json` | ~200 | Palavras isoladas + clíticos | Curadoria manual |
 | `data/lexicon_contexto.json` | ~70 | Clíticos + palavras funcionais em contexto | Curadoria manual |
 | `data/lexicon_homografos.json` | ~131 | `(palavra, sentido) → IPA` | Curadoria manual |
-| `data/regras_trema.json` | 605 + 40 radicais | Lista de palavras com trema + radicais produtivos | [IME-USP](https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt) |
+| `data/regras_trema.json` | 605 + 40 radicais | Palavras com trema + radicais produtivos | [IME-USP](https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt) |
 | `cache/lexico_espeak.json` | ~51k | Formas isoladas do espeak | `compare_vozz.py` |
 | `cache/lexico_espeak_contexto.json` | ~3.4k | Formas contextuais do espeak | `gerar_lexicon_espeak_contexto.py` |
 | `BCDE-tagger/data/*.json` | — | Tagger POS + diacríticos + resolvedor | Repo oficial do BCDE-tagger |
@@ -171,7 +192,7 @@ python3 compare_vozz.py corpus.txt
 python3 gerar_lexicon_espeak_contexto.py
 ```
 
-**`regras_trema.json`** — gerado a partir do arquivo de palavras com trema do IME-USP + lista de radicais produtivos. Créditos na seção final.
+**`regras_trema.json`** — gerado a partir do arquivo de palavras com trema do IME-USP + lista de radicais produtivos.
 
 **`lexicon_homografos.json`** — mantido por curadoria manual, chaveado por `(palavra, sentido)`.
 
@@ -254,7 +275,7 @@ println!("{}", palavra_para_ipa("exemplo", None));
 // ˌezˈeɪmplʊ
 ```
 
-### Trema (`cinquenta`, `tranquilo`, `linguiça`)
+### Trema
 
 A regra do trema é aplicada automaticamente em `palavra_para_ipa` e `fonemizar`:
 
@@ -300,7 +321,39 @@ for s in sentencas {
 }
 ```
 
-### Pipeline Piper: IPA → chunks + pausas
+### Pipeline completo — texto → chunks Piper
+
+O módulo `pipeline` faz o caminho completo em uma única chamada:
+
+```rust
+use vozz_g2p_rs::pipeline::texto_para_chunks;
+use vozz_g2p_rs::tagger;
+use vozz_g2p_rs::lexicon_homografos::LexiconHomografos;
+use std::path::Path;
+
+let tagger = tagger::carregar_tagger("BCDE-tagger/data")?;
+let hom = LexiconHomografos::from_path(
+    Path::new("data/lexicon_homografos.json"))?;
+
+let texto = "O Sr. Silva tem sede de justiça e sede em Campinas.";
+let chunks = texto_para_chunks(
+    texto,
+    Some(&tagger),
+    Some(&hom),
+    None,   // lexico
+    None,   // lexico_contexto
+);
+
+for ch in &chunks {
+    for fr in &ch.fragments {
+        println!("{}  (punct: {:?})", fr.ipa, fr.punct);
+    }
+}
+```
+
+### Pipeline Piper — IPA cru já convertido
+
+Se você já tem a IPA e só quer o alfabeto Piper + chunking:
 
 ```rust
 use vozz_g2p_rs::piper::ipa_para_piper;
@@ -310,19 +363,17 @@ let ipa = "ʊ xˈatʊ xoˈew. ˈmais aˈinda.";
 let tokens = ipa_para_piper(ipa);
 let ipa_piper: String = tokens.concat();
 
-let chunks = preparar_chunks(&ipa_piper, "triste");
+let chunks = preparar_chunks(&ipa_piper);
 for ch in &chunks {
-    println!("ls={} pausa_apos={}ms",
-             ch.length_scale, ch.pausa_apos_ms);
     for fr in &ch.fragments {
-        println!("  {}  ({}ms)", fr.ipa, fr.pausa_ms);
+        println!("{}  (punct: {:?})", fr.ipa, fr.punct);
     }
 }
 ```
 
 ---
 
-## Uso como worker (CLI)
+## Uso como worker
 
 O `phonemizer-worker` é um processo persistente: lê JSON de `stdin`, escreve JSON em `stdout`, uma linha por requisição. Mantenha o processo vivo num servidor para evitar recarregar o BCDE-tagger (~500 ms por chamada).
 
@@ -343,7 +394,7 @@ export BCDE_TAGGER_DATA=/caminho/para/BCDE-tagger/data
 
 ```json
 {
-  "build": "2024-11-piper-chunks-v2",
+  "build": "2024-11-piper-chunks-v3",
   "features": ["set_lexicon","process","process_piper",
                "process_piper_chunks","process_batch","tagger","trema"]
 }
@@ -402,29 +453,25 @@ Devolve tokens no alfabeto do Piper (`c→k`, `æ→ɐ`, `y→ɪ`, `ow→oʊ`, `
 
 #### `process_piper_chunks` — recomendado para síntese
 
-Faz chunking inteligente + cálculo de pausas por emoção. Devolve tudo pronto para o cliente sintetizar.
+Faz o chunking inteligente e devolve os fragmentos já com a pontuação marcada. O cliente (motor de síntese) decide as pausas.
 
 ```json
 {
   "action":"process_piper_chunks",
-  "text":"O Sr. Silva tem sede de justiça e sede em Campinas; depois de cinquenta anos, ele colheu os frutos tranquilos do seu trabalho.",
-  "emocao":"triste"
+  "text":"O Sr. Silva tem sede de justiça e sede em Campinas; depois de cinquenta anos, ele colheu os frutos tranquilos do seu trabalho."
 }
 ```
 
 ```json
 {
   "ipa_piper": "ʊ sˈeɲoɾ sˈiwvɐ tẽj sˈedʒi dʒi ʒustˈisɐ i sˈedʒi ẽj kɐ̃pˈinɐs; depˈojs dʒi sĩkwˈẽtɐ ˈɐnʊs, ˈeli kolˈew ʊs fɾˈutʊs tɾɐ̃kwˈilʊs dʊ sˈew tɾabˈaʎʊ.",
-  "emocao": "triste",
   "chunks": [
     {
       "fragments": [
-        {"ipa":"ʊ sˈeɲoɾ sˈiwvɐ tẽj sˈedʒi dʒi ʒustˈisɐ i sˈedʒi ẽj kɐ̃pˈinɐs","pausa_ms":434},
-        {"ipa":"depˈojs dʒi sĩkwˈẽtɐ ˈɐnʊs","pausa_ms":434},
-        {"ipa":"ˈeli kolˈew ʊs fɾˈutʊs tɾɐ̃kwˈilʊs dʊ sˈew tɾabˈaʎʊ","pausa_ms":0}
-      ],
-      "length_scale": 1.08,
-      "pausa_apos_ms": 0
+        {"ipa":"ʊ sˈeɲoɾ sˈiwvɐ tẽj sˈedʒi dʒi ʒustˈisɐ i sˈedʒi ẽj kɐ̃pˈinɐs","punct":";"},
+        {"ipa":"depˈojs dʒi sĩkwˈẽtɐ ˈɐnʊs","punct":","},
+        {"ipa":"ˈeli kolˈew ʊs fɾˈutʊs tɾɐ̃kwˈilʊs dʊ sˈew tɾabˈaʎʊ"}
+      ]
     }
   ]
 }
@@ -432,9 +479,10 @@ Faz chunking inteligente + cálculo de pausas por emoção. Devolve tudo pronto 
 
 Campos:
 
-- `fragments[].pausa_ms` — silêncio a inserir **depois** daquele fragmento.
-- `chunks[].length_scale` — passa direto para `SynthesisConfig` do Piper.
-- `chunks[].pausa_apos_ms` — silêncio a inserir entre chunks.
+- `fragments[].ipa` — IPA Piper do trecho.
+- `fragments[].punct` — pontuação que fecha o trecho (`.`, `,`, `;`, `!`, `?`, `…`). Ausente no último fragmento.
+
+O chunking agrupa sentenças curtas para não fragmentar demais (limite de 200 chars por chunk). O motor de síntese decide a duração de cada pausa.
 
 #### `process_batch` — dicionário `palavra → IPA`
 
@@ -456,256 +504,49 @@ Campos:
 
 ---
 
-## Pipeline Piper + emoções
+## Pipeline Piper
 
 ### Visão geral
 
 ```
 texto bruto
-  ↓
-normalizar.rs           ← datas, números, moedas, siglas
-  ↓
-splitter.rs             ← divide em sentenças
-  ↓
-g2p.rs                  ← por palavra:
-  ├─ tagger.rs            ↳ BCDE devolve `sense`
-  ├─ lexicon_homografos.rs ↳ (palavra, sense) → IPA
-  ├─ lexicon_contexto.rs / lexicon_palavra.rs
-  ├─ trema.rs             ↳ `qu`/`gu` antes de e/i
-  └─ regras de silabificação, tonicidade, nasalização, sândi
-  ↓
+    │
+    ▼
+[normalize]              datas, números, moedas, siglas
+    │
+    ▼
+[splitter]               divide em sentenças
+    │
+    ▼
+[g2p]                    por palavra:
+    ├─ tagger               BCDE devolve `sense`
+    ├─ lexicon_homografos   (palavra, sense) → IPA
+    ├─ lexicon_contexto / lexicon_palavra
+    ├─ trema                `qu`/`gu` antes de e/i
+    └─ regras               silabificação, tonicidade, nasalização, sândi
+    │
+    ▼
 IPA puro
-  ↓
-piper.rs                ← IPA → alfabeto do Piper
-  ↓
-piper_pipeline.rs       ← chunking + pausas × emoção
-  ↓
-JSON para o cliente
-  ↓
-PiperVoice.synthesize_wav("[[ IPA ]]")   ← no cliente Python
-```
-
-### Emoções
-
-Cada emoção ajusta dois parâmetros globais:
-
-| Emoção | `length_scale` | `fator_pausa` | Efeito |
-|--------|:-:|:-:|--------|
-| `neutro`    | 1.00 | 1.00 | Fala padrão |
-| `ansioso`   | 0.86 | 0.40 | Mais rápido, pausas curtas |
-| `cansado`   | 1.25 | 1.80 | Mais devagar, pausas longas |
-| `triste`    | 1.08 | 1.55 | Leve desaceleração, pausas longas |
-| `empolgado` | 0.92 | 0.55 | Rápido, pausas curtas |
-| `calmo`     | 1.05 | 1.20 | Leve desaceleração, pausas médias |
-
-- `length_scale` < 1 acelera, > 1 desacelera. Passado direto para `SynthesisConfig` do Piper.
-- `fator_pausa` multiplica as durações base das pausas de pontuação.
-
-### Pausas base (modo neutro)
-
-| Pontuação | Duração |
-|-----------|:-:|
-| `,` | 180 ms |
-| `;` | 280 ms |
-| `:` | 350 ms |
-| `.` | 500 ms |
-| `!` | 450 ms |
-| `?` | 450 ms |
-| `…` | 750 ms |
-
-Ajustáveis em `src/piper_pipeline.rs` (`PAUSAS_BASE`, `EMOCOES`).
-
-### Como passar a emoção
-
-Na chamada do worker:
-
-```python
-req({"action": "process_piper_chunks",
-     "text":   "Ele se foi. Sem se despedir.",
-     "emocao": "triste"})
-```
-
-Em Rust puro:
-
-```rust
-use vozz_g2p_rs::piper_pipeline::preparar_chunks;
-
-let chunks = preparar_chunks(&ipa_piper, "triste");
+    │
+    ▼
+[piper]                  IPA → alfabeto do Piper
+    │
+    ▼
+[piper_pipeline]         chunking + marcação de pontuação
+    │
+    ▼
+JSON com chunks + punct
 ```
 
 ### Chunking inteligente
 
 O módulo `piper_pipeline.rs` implementa:
 
-1. **Se o IPA total ≤ 200 chars** → 1 chunk único. Evita sintetizar `"Ele se foi."` / `"Sem se despedir."` / `"Fiquei aqui."` / `"Sozinho."` separadamente, o que soa robótico.
+1. **Se a IPA total ≤ 200 chars** → 1 chunk único. Evita sintetizar `"Ele se foi."` / `"Sem se despedir."` / `"Fiquei aqui."` / `"Sozinho."` separadamente, o que soa robótico.
 2. **Se > 200 chars** → corta nos `.`/`!`/`?`/`…` e agrupa pedaços até chegar em ~200 chars por chunk.
-3. Dentro de cada chunk, cada fragmento carrega sua própria pausa (calculada pela pontuação final × `fator_pausa`).
+3. Dentro de cada chunk, cada fragmento carrega sua pontuação final (`punct`).
 
 O limite é `LIMITE_CHUNK` em `src/piper_pipeline.rs`.
-
----
-
-## Calibração por voz
-
-Modelos Piper diferentes têm cadências diferentes. Para máxima naturalidade, recomendamos calibrar as pausas **uma vez por voz** e salvar num `<voz>.config.json`.
-
-### Como calibrar
-
-O princípio: sintetizar uma frase base sem pontuação, medir a duração, depois sintetizar a mesma frase com cada pontuação e medir o delta.
-
-```python
-# calibrador.py
-import io, wave, json, os
-import numpy as np
-from piper import PiperVoice, SynthesisConfig
-
-BASE = "o rato roeu a roupa do rei de roma e a rainha de raiva roeu o resto"
-MODELOS = {
-    ",": "o rato roeu, a roupa do rei de roma e a rainha de raiva roeu o resto",
-    ";": "o rato roeu; a roupa do rei de roma e a rainha de raiva roeu o resto",
-    ":": "o rato roeu: a roupa do rei de roma e a rainha de raiva roeu o resto",
-    ".": "o rato roeu. a roupa do rei de roma e a rainha de raiva roeu o resto",
-    "!": "o rato roeu! a roupa do rei de roma e a rainha de raiva roeu o resto",
-    "?": "o rato roeu? a roupa do rei de roma e a rainha de raiva roeu o resto",
-    "…": "o rato roeu… a roupa do rei de roma e a rainha de raiva roeu o resto",
-}
-
-def dur(voice, texto, ls=1.0):
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        voice.synthesize_wav(texto, wf, syn_config=SynthesisConfig(length_scale=ls))
-    buf.seek(0)
-    with wave.open(buf, "rb") as wf:
-        sr = wf.getframerate()
-        a = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-    return sr, len(a) / sr
-
-def calibrar(onnx_path, config_path, cache_path):
-    if os.path.exists(cache_path):
-        return json.load(open(cache_path))
-
-    voice = PiperVoice.load(onnx_path, config_path=config_path)
-    sr, dur_base = dur(voice, BASE)
-    taxa = dur_base / len(BASE)
-
-    pausas = {}
-    for p, frase in MODELOS.items():
-        _, d = dur(voice, frase)
-        pausas[p] = max(0, int((d - dur_base) * 1000))
-
-    cfg = {
-        "voz": os.path.basename(onnx_path).replace(".onnx", ""),
-        "sr": sr,
-        "taxa_s_char_base": round(taxa, 5),
-        "pausas_ms": pausas,
-        "emocoes": {
-            "neutro":    {"length_scale": 1.00, "fator_pausa": 1.00},
-            "ansioso":   {"length_scale": 0.86, "fator_pausa": 0.40},
-            "cansado":   {"length_scale": 1.25, "fator_pausa": 1.80},
-            "triste":    {"length_scale": 1.08, "fator_pausa": 1.55},
-            "empolgado": {"length_scale": 0.92, "fator_pausa": 0.55},
-            "calmo":     {"length_scale": 1.05, "fator_pausa": 1.20},
-        },
-    }
-    json.dump(cfg, open(cache_path, "w"), indent=2, ensure_ascii=False)
-    return cfg
-```
-
-### Observação sobre o modelo Faber Medium
-
-O Faber Medium **não emite pausas diferenciadas por pontuação**. O delta medido entre frases com/sem vírgula é próximo de zero. Nesse caso, use as `PAUSAS_BASE` default do `piper_pipeline.rs` (que são valores empíricos para narração pt-BR) e apenas module com `fator_pausa` da emoção.
-
-### Cache
-
-O `<voz>.config.json` é carregado instantaneamente. Próximas execuções pulam a calibração. Para forçar recalibração, apague o arquivo.
-
----
-
-## Cliente Python (referência)
-
-O worker devolve JSON pronto. O cliente Python só precisa renderizar os chunks.
-
-```python
-import subprocess, json, io, wave, os
-import numpy as np
-from piper import PiperVoice, SynthesisConfig
-
-class VozzPiper:
-    def __init__(self, worker_bin, onnx_path, config_path, tagger_data):
-        env = {**os.environ, "BCDE_TAGGER_DATA": str(tagger_data)}
-        self.proc = subprocess.Popen(
-            [str(worker_bin)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1, env=env)
-        self._req({"action": "version"})   # handshake
-
-        self.voice = PiperVoice.load(str(onnx_path), config_path=str(config_path))
-        self.sr = self.voice.config.sample_rate
-
-    def _req(self, obj):
-        self.proc.stdin.write(json.dumps(obj) + "\n")
-        self.proc.stdin.flush()
-        return json.loads(self.proc.stdout.readline())
-
-    def _synth_frag(self, ipa, ls):
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wf:
-            self.voice.synthesize_wav(f"[[ {ipa} ]]", wf,
-                                      syn_config=SynthesisConfig(length_scale=ls))
-        buf.seek(0)
-        with wave.open(buf, "rb") as wf:
-            sr = wf.getframerate()
-            a = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-        return sr, a
-
-    def sintetizar(self, texto, emocao="neutro"):
-        r = self._req({
-            "action": "process_piper_chunks",
-            "text":   texto,
-            "emocao": emocao,
-        })
-        chunks = r.get("chunks", [])
-        if not chunks:
-            return self.sr, np.zeros(0, dtype=np.int16)
-
-        blocos = []
-        for ch in chunks:
-            ls = ch["length_scale"]
-            for fr in ch["fragments"]:
-                sr, audio = self._synth_frag(fr["ipa"], ls)
-                blocos.append(audio)
-                if fr["pausa_ms"] > 0:
-                    blocos.append(np.zeros(int(sr * fr["pausa_ms"] / 1000),
-                                           dtype=np.int16))
-            if ch["pausa_apos_ms"] > 0:
-                blocos.append(np.zeros(int(self.sr * ch["pausa_apos_ms"] / 1000),
-                                       dtype=np.int16))
-
-        return self.sr, np.concatenate(blocos)
-
-    def fechar(self):
-        try:
-            self.proc.stdin.close()
-            self.proc.wait(timeout=5)
-        except Exception:
-            self.proc.kill()
-```
-
-Uso:
-
-```python
-v = VozzPiper(
-    worker_bin  = "vozz-g2p-rs/target/release/phonemizer-worker",
-    onnx_path   = "pt_BR-faber-medium.onnx",
-    config_path = "pt_BR-faber-medium.onnx.json",
-    tagger_data = "BCDE-tagger/data",
-)
-
-sr, audio = v.sintetizar(
-    "Ele se foi. Sem se despedir, sem dizer nada. Fiquei aqui. Sozinho.",
-    emocao="triste",
-)
-```
 
 ---
 
@@ -799,6 +640,34 @@ pub fn acentuar(silabas: &mut [Silaba], palavra: &str) -> i32
 
 Marca a sílaba tônica **in place** e devolve o índice.
 
+### `pipeline::texto_para_chunks`
+
+```rust
+pub fn texto_para_chunks(
+    texto: &str,
+    tagger: Option<&Tagger>,
+    homografos: Option<&LexiconHomografos>,
+    lexico: Option<&HashMap<String, String>>,
+    lexico_contexto: Option<&HashMap<String, String>>,
+) -> Vec<Chunk>
+```
+
+Pipeline completo: normaliza, divide, fonemiza e chunka.
+
+### `pipeline::texto_para_ipa`
+
+```rust
+pub fn texto_para_ipa(
+    texto: &str,
+    tagger: Option<&Tagger>,
+    homografos: Option<&LexiconHomografos>,
+    lexico: Option<&HashMap<String, String>>,
+    lexico_contexto: Option<&HashMap<String, String>>,
+) -> (String, Vec<Chunk>)
+```
+
+Variante que devolve também a IPA completa.
+
 ### `tagger::carregar_tagger`
 
 ```rust
@@ -838,17 +707,15 @@ Converte IPA cru para o alfabeto do Piper.
 ### `piper_pipeline::preparar_chunks`
 
 ```rust
-pub fn preparar_chunks(ipa_piper: &str, emocao: &str) -> Vec<Chunk>
+pub fn preparar_chunks(ipa_piper: &str) -> Vec<Chunk>
 
 pub struct Chunk {
     pub fragments: Vec<Fragmento>,
-    pub length_scale: f32,
-    pub pausa_apos_ms: u32,
 }
 
 pub struct Fragmento {
     pub ipa: String,
-    pub pausa_ms: u32,
+    pub punct: Option<char>,
 }
 ```
 
@@ -906,7 +773,7 @@ use vozz_g2p_rs::lexicon_contexto::{buscar_clitico_contexto, buscar_lexico_conte
 
 ---
 
-## Regras fonológicas implementadas
+## Regras fonológicas
 
 ### Nasalização
 
@@ -1003,7 +870,7 @@ Cobre **~180 testes unitários** distribuídos em:
 - `splitter`: sentenças simples, abreviações, decimais, parágrafos.
 - `trema`: hipótese, radicais, casos positivos/negativos.
 - `piper`: conversão de chars, mapeamento `c→k`, ditongos.
-- `piper_pipeline`: chunking curto/longo, segmentação por pausa, emoções.
+- `piper_pipeline`: chunking curto/longo, marcação de pontuação.
 - `g2p`: silabificação, acentuação, nasalização, ditongos, `x`, `ex-`, sândi.
 
 ---
@@ -1012,7 +879,7 @@ Cobre **~180 testes unitários** distribuídos em:
 
 **Por que Rust e não manter em JavaScript?**
 
-Performance. Em palavras isoladas, o Rust é ~2,5x mais rápido que o JS (~16 µs vs ~40 µs por palavra). Além disso, um binário nativo integra melhor em pipelines Python, C++, Go, e em servidores de TTS.
+Performance. Em palavras isoladas, o Rust é ~2,5× mais rápido que o JS (~16 µs vs ~40 µs por palavra). Além disso, um binário nativo integra melhor em pipelines Python, C++, Go, e em servidores de TTS.
 
 **Por que o `espeak-ng` é o gabarito?**
 
@@ -1020,19 +887,11 @@ Porque modelos neurais de TTS para pt-BR (Piper, Coqui, VITS) usam a convenção
 
 **Por que trocar o NB pelo BCDE-tagger?**
 
-O BCDE-tagger resolve casos que o NB não pegava: homógrafos com o mesmo POS e sentidos distintos (ex.: `sede` = `seat`/`thirst`). Além disso, o tagger cobre todo o POS tagging, não só a desambiguação — o que ajuda na geração de features.
+O BCDE-tagger resolve casos que o NB não pegava: homógrafos com o mesmo POS e sentidos distintos (ex.: `sede` = `seat`/`thirst`). Além disso, o tagger cobre todo o POS tagging, não só a desambiguação.
 
-**Como a emoção afeta a síntese?**
+**Como o chunking do Piper funciona?**
 
-Cada emoção define dois parâmetros: `length_scale` (velocidade da fala) e `fator_pausa` (multiplicador das pausas de pontuação). O `process_piper_chunks` aplica ambos e devolve os chunks já com as pausas calculadas. O cliente só renderiza.
-
-**Preciso calibrar a voz?**
-
-Não é obrigatório — os valores default em `piper_pipeline.rs` funcionam bem para narração pt-BR. Mas se você usar um modelo diferente do Faber Medium, vale rodar o calibrador e salvar `<voz>.config.json`.
-
-**Como sei que o modelo de homógrafos não está overfitado?**
-
-O BCDE-tagger foi validado em três corpora independentes com ~98% de acurácia POS. Veja a documentação do projeto para os números completos.
+O `process_piper_chunks` faz a segmentação inteligente: se a IPA total cabe em 200 chars, devolve 1 chunk único (evita sintetizar frases curtas separadamente). Se for maior, agrupa pedaços cortados nos finais de sentença (`.`, `!`, `?`, `…`). Cada fragmento carrega a pontuação final (`punct`), e o motor de síntese decide a pausa correspondente.
 
 **Onde encontro o relatório completo de desenvolvimento?**
 
@@ -1051,29 +910,11 @@ A escolha da Apache-2.0 mantém compatibilidade com o [Vozz original](https://gi
 ## Créditos
 
 - **[Vozz](https://github.com/Pedro21062014/vozz)** — biblioteca original em JS, da qual este projeto é um fork. As regras fonológicas, o léxico base e o protocolo do worker vêm de lá.
-- **[BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger)** — POS tagger e desambiguador de homógrafos para pt-BR. Substitui o classificador NB anterior, elevando a acurácia em homógrafos com mesmo POS.
+- **[BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger)** — POS tagger e desambiguador de homógrafos para pt-BR. Substitui o classificador NB anterior.
 - **[espeak-ng](https://github.com/espeak-ng/espeak-ng)** — a referência de convenção IPA e de comportamento fonológico para pt-BR.
-- **[Piper](https://github.com/rhasspy/piper)** — modelo neural de TTS que inspirou a busca pela máxima fidelidade ao `espeak-ng pt-br` e o pipeline de chunks + emoções.
-- **[IME-USP](https://www.ime.usp.br/~pf/dicios/)** — a lista de palavras com trema (`br-com-trema-latin1.txt`), mantida pelo Prof. Paulo Feofiloff, serviu de base para o `data/regras_trema.json`. O arquivo original está em https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt
+- **[Piper](https://github.com/rhasspy/piper)** — modelo neural de TTS que inspirou o pipeline de chunks.
+- **[IME-USP](https://www.ime.usp.br/~pf/dicios/)** — a lista de palavras com trema (`br-com-trema-latin1.txt`), mantida pelo Prof. Paulo Feofiloff, serviu de base para o `data/regras_trema.json`.
 - **[Bifonia](https://github.com/TigreGotico/bifonia)** — referência arquitetural para o classificador NB da versão anterior (já removido).
-
----
-
-## Contribuições
-
-Pull requests são bem-vindos. Para mudanças de regra fonológica:
-
-1. Rode `cargo test` para garantir que os testes existentes passam.
-2. Rode `python3 compare_vozz.py corpus.txt --skip-install` para medir o impacto contra o espeak.
-3. Adicione testes unitários cobrindo os novos casos.
-4. Descreva no PR quais padrões foram corrigidos e qual a variação na taxa de acerto.
-
-Para bug reports, inclua:
-
-- Palavra(s) afetada(s)
-- IPA produzido
-- IPA esperado (do `espeak-ng -v pt-br --ipa=3 -q "palavra"`)
-- Contexto (se for influenciado por palavras vizinhas)
 
 ---
 
@@ -1092,24 +933,8 @@ O Vozz é o fork original do projeto. As regras fonológicas, o léxico base e o
 
 ---
 
-## Licença
+<div align="center">
 
-```
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+Feito com ❤️ para a comunidade pt-BR.
 
-   Copyright 2024-presente, contribuidores do vozz-g2p-rs
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-```
+</div>
