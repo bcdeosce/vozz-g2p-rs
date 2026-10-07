@@ -279,31 +279,26 @@ fn handle_process_piper(e: &Estado, req: &Value) -> RespostaProcessoPiper {
 fn handle_process_piper_chunks(e: &Estado, req: &Value) -> Value {
     let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
     let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("");
-    let emocao = req.get("emocao").and_then(|v| v.as_str()).unwrap_or("neutro");
     let overrides = extrair_overrides(req);
 
     let (l, lc) = get_lexicons_for(e, voice, &overrides);
     let norm = normalizar(text, OpcoesNormalizar::default());
     let sents = dividir_em_sentencas(&norm);
 
-    // Concatena o IPA JÁ CONVERTIDO PARA O FORMATO PIPER.
-    // Isso garante que o chunk_inteligente conte chars no mesmo
-    // alfabeto que o cliente vai sintetizar.
     let mut ipa_piper = String::new();
     for s in &sents {
         let o = opcoes_para(e, &l, &lc);
-        let ipa_cru = fonemizar(s, &o);
-        let tokens = ipa_para_piper(&ipa_cru);   // Vec<String>
+        let ipa = fonemizar(s, &o);
+        let tokens = ipa_para_piper(&ipa);
         let pedaco: String = tokens.iter().map(|s| s.as_str()).collect();
         if !ipa_piper.is_empty() { ipa_piper.push(' '); }
         ipa_piper.push_str(pedaco.trim());
     }
 
-    let chunks = preparar_chunks(&ipa_piper, emocao);
+    let chunks = piper_pipeline::preparar_chunks(&ipa_piper);
 
     serde_json::json!({
         "ipa_piper": ipa_piper,
-        "emocao": emocao,
         "chunks": chunks,
     })
 }
