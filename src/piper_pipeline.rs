@@ -1,101 +1,104 @@
-//! Chunking inteligente. Não calcula pausas — só marca a pontuação
-//! que fecha cada fragmento. A pausa fica a cargo do sintetizador.
+//! Pipeline de alto nível: texto bruto → chunks Piper.
+//!
+//! Junta:
+//!   1. normalize::normalizar    (datas, números, moedas)
+//!   2. splitter::dividir_em_sentencas
+//!   3. g2p::fonemizar           (usa tagger + homógrafos internamente)
+//!   4. piper::ipa_para_piper
+//!   5. piper_pipeline::preparar_chunks
+//!
+//! Nenhuma chamada a subprocesso. O tagger é uma referência direta
+//! à lib `bcde_tagger::Tagger`.
 
-use serde::Serialize;
+use crate::g2p::{fonemizar, OpcoesFonemizar};
+use crate::lexicon_homografos::LexiconHomografos;
+use crate::normalize::{normalizar, OpcoesNormalizar};
+use crate::piper::ipa_para_piper;
+use crate::piper_pipeline::{preparar_chunks, Chunk};
+use crate::splitter::dividir_em_sentencas;
+use crate::tagger::Tagger;
+use std::collections::HashMap;
 
-pub const LIMITE_CHUNK: usize = 200;
-pub const PUNCT_FRAC: &[char] = &['.', '!', '?', '…'];
-pub const PUNCT_PAUSA: &[char] = &[',', ';', ':', '.', '!', '?', '…'];
+/// Texto bruto → chunks prontos para síntese Piper.
+///
+/// `tagger`, `homografos`, `lexico` e `lexico_contexto` são opcionais.
+/// Se o tagger for `None`, homógrafos não são desambiguados.
+pub fn texto_para_chunks(
+    texto: &str,
+    tagger: Option<&Tagger>,
+    homografos: Option<&LexiconHomografos>,
+    lexico: Option<&HashMap<String, String>>,
+    lexico_contexto: Option<&HashMap<String, String>>,
+) -> Vec<Chunk> {
+    if texto.trim().is_empty() {
+        return Vec::new();
+    }
 
-#[derive(Serialize, Debug, Clone)]
-pub struct Fragmento {
-    pub ipa: String,
-    /// Pontuação que fecha o fragmento. `None` = último, sem pausa.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub punct: Option<char>,
-}
+    // 1. Normaliza
+    let normalizado = normalizar(texto, OpcoesNormalizar::default());
 
-#[derive(Serialize, Debug, Clone)]
-pub struct Chunk {
-    pub fragments: Vec<Fragmento>,
-}
+    // 2. Divide em sentenças
+    let sentencas = dividir_em_sentencas(&normalizado);
+    if sentencas.is_empty() {
+        return Vec::new();
+    }
 
-pub fn chunk_inteligente(ipa: &str, limite: usize) -> Vec<String> {
-    let ipa = ipa.trim();
-    if ipa.is_empty() { return Vec::new(); }
-    if ipa.chars().count() <= limite { return vec![ipa.to_string()]; }
+    // 3. Fonemiza cada sentença. O g2p consulta o tagger internamente.
+    let opcoes = OpcoesFonemizar {
+        normalizar: false,
+        lexico,
+        lexico_contexto,
+        homografos,
+        tagger,
+    };
 
-    let mut partes: Vec<String> = Vec::new();
-    let mut buf = String::new();
-    for c in ipa.chars() {
-        buf.push(c);
-        if PUNCT_FRAC.contains(&c) {
-            let s = buf.trim().to_string();
-            if !s.is_empty() { partes.push(s); }
-            buf.clear();
+    let mut ipa_piper = String::new();
+    for s in &sentencas {
+        let ipa = fonemizar(s, &opcoes);
+        let tokens = ipa_para_piper(&ipa);
+        let pedaco: String = tokens.iter().map(|t| t.as_str()).collect();
+        if !ipa_piper.is_empty() {
+            ipa_piper.push(' ');
         }
+        ipa_piper.push_str(pedaco.trim());
     }
-    let resto = buf.trim();
-    if !resto.is_empty() { partes.push(resto.to_string()); }
 
-    let mut grupos: Vec<String> = Vec::new();
-    let mut atual = String::new();
-    for p in partes {
-        let cand = if atual.is_empty() { p.clone() } else { format!("{} {}", atual, p) };
-        if cand.chars().count() > limite && !atual.is_empty() {
-            grupos.push(atual.trim().to_string());
-            atual = p;
-        } else {
-            atual = cand;
-        }
-    }
-    if !atual.trim().is_empty() { grupos.push(atual.trim().to_string()); }
-    grupos
+    // 4. Chunking
+    preparar_chunks(&ipa_piper)
 }
 
-pub fn segmentar_por_pausa(ipa: &str) -> Vec<(String, Option<char>)> {
-    let mut frags = Vec::new();
-    let mut buf = String::new();
-    for c in ipa.chars() {
-        if PUNCT_PAUSA.contains(&c) {
-            let s = buf.trim().to_string();
-            if !s.is_empty() { frags.push((s, Some(c))); }
-            buf.clear();
-        } else {
-            buf.push(c);
-        }
-    }
-    let resto = buf.trim();
-    if !resto.is_empty() { frags.push((resto.to_string(), None)); }
-    frags
-}
-
-pub fn preparar_chunks(ipa_piper: &str) -> Vec<Chunk> {
-    let chunks_ipa = chunk_inteligente(ipa_piper, LIMITE_CHUNK);
-    chunks_ipa.into_iter().map(|c| {
-        let frags = segmentar_por_pausa(&c);
-        Chunk {
-            fragments: frags.into_iter().map(|(ipa, punct)| Fragmento { ipa, punct }).collect(),
-        }
-    }).collect()
-}
-
-#[cfg(test)]
-mod testes {
-    use super::*;
-
-    #[test]
-    fn chunk_curto_e_unico() {
-        assert_eq!(chunk_inteligente("ʊ xˈatʊ.", 200).len(), 1);
+/// Versão que devolve também a IPA completa (útil para debug).
+pub fn texto_para_ipa(
+    texto: &str,
+    tagger: Option<&Tagger>,
+    homografos: Option<&LexiconHomografos>,
+    lexico: Option<&HashMap<String, String>>,
+    lexico_contexto: Option<&HashMap<String, String>>,
+) -> (String, Vec<Chunk>) {
+    if texto.trim().is_empty() {
+        return (String::new(), Vec::new());
     }
 
-    #[test]
-    fn marca_punct() {
-        let chunks = preparar_chunks("ʊ xˈatʊ, xoˈew. mˈais");
-        assert_eq!(chunks.len(), 1);
-        let frags = &chunks[0].fragments;
-        assert_eq!(frags[0].punct, Some(','));
-        assert_eq!(frags[1].punct, Some('.'));
-        assert_eq!(frags[2].punct, None);
+    let normalizado = normalizar(texto, OpcoesNormalizar::default());
+    let sentencas = dividir_em_sentencas(&normalizado);
+
+    let opcoes = OpcoesFonemizar {
+        normalizar: false,
+        lexico,
+        lexico_contexto,
+        homografos,
+        tagger,
+    };
+
+    let mut ipa_piper = String::new();
+    for s in &sentencas {
+        let ipa = fonemizar(s, &opcoes);
+        let tokens = ipa_para_piper(&ipa);
+        let pedaco: String = tokens.iter().map(|t| t.as_str()).collect();
+        if !ipa_piper.is_empty() { ipa_piper.push(' '); }
+        ipa_piper.push_str(pedaco.trim());
     }
+
+    let chunks = preparar_chunks(&ipa_piper);
+    (ipa_piper, chunks)
 }
