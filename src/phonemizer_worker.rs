@@ -24,6 +24,7 @@ use vozz_g2p_rs::piper_pipeline::{self, preparar_chunks};
 use vozz_g2p_rs::splitter::dividir_em_sentencas;
 use vozz_g2p_rs::tagger::Tagger;
 
+
 const SLOW_THRESHOLD_MS: u128 = 50;
 const BUILD_ID: &str = "2024-11-piper-chunks-v2";
 
@@ -285,19 +286,23 @@ fn handle_process_piper_chunks(e: &Estado, req: &Value) -> Value {
     let norm = normalizar(text, OpcoesNormalizar::default());
     let sents = dividir_em_sentencas(&norm);
 
-    // Concatena o IPA de todas as sentenças, preservando pontuação.
-    let mut ipa_full = String::new();
+    // Concatena o IPA JÁ CONVERTIDO PARA O FORMATO PIPER.
+    // Isso garante que o chunk_inteligente conte chars no mesmo
+    // alfabeto que o cliente vai sintetizar.
+    let mut ipa_piper = String::new();
     for s in &sents {
         let o = opcoes_para(e, &l, &lc);
-        let ipa = fonemizar(s, &o);
-        if !ipa_full.is_empty() { ipa_full.push(' '); }
-        ipa_full.push_str(ipa.trim());
+        let ipa_cru = fonemizar(s, &o);
+        let tokens = ipa_para_piper(&ipa_cru);   // Vec<String>
+        let pedaco: String = tokens.iter().map(|s| s.as_str()).collect();
+        if !ipa_piper.is_empty() { ipa_piper.push(' '); }
+        ipa_piper.push_str(pedaco.trim());
     }
 
-    let chunks = preparar_chunks(&ipa_full, emocao);
+    let chunks = preparar_chunks(&ipa_piper, emocao);
 
     serde_json::json!({
-        "ipa_completo": ipa_full,
+        "ipa_piper": ipa_piper,
         "emocao": emocao,
         "chunks": chunks,
     })
