@@ -1,4 +1,3 @@
-```markdown
 # vozz-g2p-rs
 
 Conversor **grafema→fonema (G2P) para português do Brasil**, escrito em Rust puro, com foco em fidelidade à convenção IPA do `espeak-ng pt-br` — a mesma convenção com que modelos neurais de TTS (Piper, Coqui, VITS) são treinados.
@@ -130,7 +129,7 @@ bcde-tagger = { git = "https://github.com/bcdeosce/BCDE-tagger" }
 git clone https://github.com/bcdeosce/vozz-g2p-rs.git
 git clone https://github.com/bcdeosce/BCDE-tagger
 
-cd BCDE-tagger   && cargo build --release
+cd BCDE-tagger    && cargo build --release
 cd ../vozz-g2p-rs && cargo build --release
 ```
 
@@ -401,7 +400,7 @@ Devolve tokens no alfabeto do Piper (`c→k`, `æ→ɐ`, `y→ɪ`, `ow→oʊ`, `
 }
 ```
 
-#### `process_piper_chunks` — **recomendado para síntese**
+#### `process_piper_chunks` — recomendado para síntese
 
 Faz chunking inteligente + cálculo de pausas por emoção. Devolve tudo pronto para o cliente sintetizar.
 
@@ -432,6 +431,7 @@ Faz chunking inteligente + cálculo de pausas por emoção. Devolve tudo pronto 
 ```
 
 Campos:
+
 - `fragments[].pausa_ms` — silêncio a inserir **depois** daquele fragmento.
 - `chunks[].length_scale` — passa direto para `SynthesisConfig` do Piper.
 - `chunks[].pausa_apos_ms` — silêncio a inserir entre chunks.
@@ -463,22 +463,22 @@ Campos:
 ```
 texto bruto
   ↓
-normalizar.rs          ← datas, números, moedas, siglas
+normalizar.rs           ← datas, números, moedas, siglas
   ↓
-splitter.rs            ← divide em sentenças
+splitter.rs             ← divide em sentenças
   ↓
-g2p.rs                 ← por palavra:
-  ├─ tagger.rs           ↳ BCDE devolve `sense`
+g2p.rs                  ← por palavra:
+  ├─ tagger.rs            ↳ BCDE devolve `sense`
   ├─ lexicon_homografos.rs ↳ (palavra, sense) → IPA
   ├─ lexicon_contexto.rs / lexicon_palavra.rs
-  ├─ trema.rs            ↳ `qu`/`gu` antes de e/i
+  ├─ trema.rs             ↳ `qu`/`gu` antes de e/i
   └─ regras de silabificação, tonicidade, nasalização, sândi
   ↓
 IPA puro
   ↓
-piper.rs               ← IPA → alfabeto do Piper
+piper.rs                ← IPA → alfabeto do Piper
   ↓
-piper_pipeline.rs      ← chunking + pausas × emoção
+piper_pipeline.rs       ← chunking + pausas × emoção
   ↓
 JSON para o cliente
   ↓
@@ -537,8 +537,7 @@ let chunks = preparar_chunks(&ipa_piper, "triste");
 
 O módulo `piper_pipeline.rs` implementa:
 
-1. **Se o IPA total ≤ 200 chars** → 1 chunk único.
-   Evita sintetizar `"Ele se foi."` / `"Sem se despedir."` / `"Fiquei aqui."` / `"Sozinho."` separadamente, o que soa robótico.
+1. **Se o IPA total ≤ 200 chars** → 1 chunk único. Evita sintetizar `"Ele se foi."` / `"Sem se despedir."` / `"Fiquei aqui."` / `"Sozinho."` separadamente, o que soa robótico.
 2. **Se > 200 chars** → corta nos `.`/`!`/`?`/`…` e agrupa pedaços até chegar em ~200 chars por chunk.
 3. Dentro de cada chunk, cada fragmento carrega sua própria pausa (calculada pela pontuação final × `fator_pausa`).
 
@@ -1055,7 +1054,7 @@ A escolha da Apache-2.0 mantém compatibilidade com o [Vozz original](https://gi
 - **[BCDE-tagger](https://github.com/bcdeosce/BCDE-tagger)** — POS tagger e desambiguador de homógrafos para pt-BR. Substitui o classificador NB anterior, elevando a acurácia em homógrafos com mesmo POS.
 - **[espeak-ng](https://github.com/espeak-ng/espeak-ng)** — a referência de convenção IPA e de comportamento fonológico para pt-BR.
 - **[Piper](https://github.com/rhasspy/piper)** — modelo neural de TTS que inspirou a busca pela máxima fidelidade ao `espeak-ng pt-br` e o pipeline de chunks + emoções.
-- **[IME-USP](https://www.ime.usp.br/~pf/dicios/)** — a lista de palavras com trema (`br-com-trema-latin1.txt`), mantida pelo Prof. Paulo Feofiloff, serviu de base para o `data/regras_trema.json`. O arquivo original está em [https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt](https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt).
+- **[IME-USP](https://www.ime.usp.br/~pf/dicios/)** — a lista de palavras com trema (`br-com-trema-latin1.txt`), mantida pelo Prof. Paulo Feofiloff, serviu de base para o `data/regras_trema.json`. O arquivo original está em https://www.ime.usp.br/~pf/dicios/br-com-trema-latin1.txt
 - **[Bifonia](https://github.com/TigreGotico/bifonia)** — referência arquitetural para o classificador NB da versão anterior (já removido).
 
 ---
@@ -1093,11 +1092,12 @@ O Vozz é o fork original do projeto. As regras fonológicas, o léxico base e o
 
 ---
 
+## Licença
+
+```
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
-
-   [texto completo da licença Apache 2.0 — manter inalterado]
 
    Copyright 2024-presente, contribuidores do vozz-g2p-rs
 
@@ -1113,4 +1113,3 @@ O Vozz é o fork original do projeto. As regras fonológicas, o léxico base e o
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
-
