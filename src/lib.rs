@@ -6,6 +6,7 @@ pub mod normalize;
 pub mod numbers;
 pub mod piper;
 pub mod piper_pipeline;
+pub mod pipeline;
 pub mod splitter;
 pub mod tagger;
 pub mod trema;
@@ -17,4 +18,5 @@ pub use g2p::{
 pub use normalize::{normalizar, OpcoesNormalizar};
 pub use piper::{ipa_para_piper, ipa_para_piper_str};
 pub use piper_pipeline::{preparar_chunks, Chunk, Fragmento};
+pub use pipeline::{texto_para_chunks, texto_para_ipa};
 pub use splitter::dividir_em_sentencas;
