@@ -1,17 +1,12 @@
-//! Worker persistente: recebe JSON via stdin, devolve JSON via stdout.
+//! Worker persistente: JSON via stdin/stdout.
 //!
 //! Ações:
-//!
-//! ```json
-//! {"action":"version"}
-//! {"action":"set_lexicon","base_path":"...","global_path":"...","voice_paths":{...},"context_path":"..."}
-//! {"action":"process","text":"...","voice":"idoso","overrides":{...}}
-//! {"action":"process_piper","text":"...","voice":"idoso","overrides":{...}}
-//! {"action":"process_batch","words":["casa","banana",...],"voice":"","overrides":{}}
-//! ```
-//!
-//! `process`        → IPA puro (String), compatibilidade com outros projetos.
-//! `process_piper`  → tokens do Piper (Vec<String> por sentença).
+//!   version
+//!   set_lexicon
+//!   process                 → IPA puro por sentença
+//!   process_piper           → tokens Piper por sentença
+//!   process_piper_chunks    → chunks + pausas prontos para síntese
+//!   process_batch
 
 use serde::Serialize;
 use serde_json::Value;
@@ -25,16 +20,16 @@ use vozz_g2p_rs::g2p::{fonemizar, OpcoesFonemizar};
 use vozz_g2p_rs::lexicon_homografos::LexiconHomografos;
 use vozz_g2p_rs::normalize::{normalizar, precisa_normalizar, OpcoesNormalizar};
 use vozz_g2p_rs::piper::ipa_para_piper;
+use vozz_g2p_rs::piper_pipeline::{self, preparar_chunks};
 use vozz_g2p_rs::splitter::dividir_em_sentencas;
-use vozz_g2p_rs::tagger::{self, Tagger};
+use vozz_g2p_rs::tagger::Tagger;
 
 const SLOW_THRESHOLD_MS: u128 = 50;
+const BUILD_ID: &str = "2024-11-piper-chunks-v2";
 
-const BUILD_ID: &str = "2024-11-bcde-lib-trema-piper-v1";
-
-// ---------------------------------------------------------------------------
-// Estado global
-// ---------------------------------------------------------------------------
+// ... (mantém Estado, RespostaOk, RespostaErro, RespostaProcesso,
+//      Sentenca, RespostaProcessoPiper, SentencaPiper, RespostaBatch
+//      exatamente como no arquivo atual) ...
 
 struct Estado {
     lexicon_base: Arc<HashMap<String, String>>,
@@ -62,218 +57,108 @@ impl Estado {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Formato de resposta
-// ---------------------------------------------------------------------------
+// ─── Respostas ────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
-struct RespostaOk {
-    ok: bool,
+#[derive(Serialize)] struct RespostaOk { ok: bool }
+#[derive(Serialize)] struct RespostaErro { error: String }
+#[derive(Serialize)] struct RespostaProcesso { sentences: Vec<Sentenca> }
+#[derive(Serialize)] struct Sentenca { text: String, phonemes: String }
+#[derive(Serialize)] struct RespostaProcessoPiper { sentences: Vec<SentencaPiper> }
+#[derive(Serialize)] struct SentencaPiper { text: String, phonemes: Vec<String> }
+#[derive(Serialize)] struct RespostaBatch {
+    phonemes: HashMap<String, String>, timing_ms: u128, total: usize,
 }
 
-#[derive(Serialize)]
-struct RespostaErro {
-    error: String,
-}
-
-#[derive(Serialize)]
-struct RespostaProcesso {
-    sentences: Vec<Sentenca>,
-}
-
-#[derive(Serialize)]
-struct Sentenca {
-    text: String,
-    phonemes: String,
-}
-
-#[derive(Serialize)]
-struct RespostaProcessoPiper {
-    sentences: Vec<SentencaPiper>,
-}
-
-#[derive(Serialize)]
-struct SentencaPiper {
-    text: String,
-    phonemes: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct RespostaBatch {
-    phonemes: HashMap<String, String>,
-    timing_ms: u128,
-    total: usize,
-}
-
-// ---------------------------------------------------------------------------
-// Carregamento de léxicos
-// ---------------------------------------------------------------------------
+// ─── Carregamento de léxicos (idêntico ao atual) ──────────────────────
 
 fn carregar_json_seguro(path: &Option<String>) -> HashMap<String, String> {
-    let Some(p) = path.as_deref() else {
-        return HashMap::new();
-    };
+    let Some(p) = path.as_deref() else { return HashMap::new(); };
     match std::fs::read_to_string(p) {
-        Ok(conteudo) => match serde_json::from_str::<HashMap<String, String>>(&conteudo) {
-            Ok(mapa) => mapa,
-            Err(erro) => {
-                eprintln!("[lexicon] erro parsing {}: {}", p, erro);
-                HashMap::new()
-            }
+        Ok(c) => match serde_json::from_str::<HashMap<String, String>>(&c) {
+            Ok(m) => m,
+            Err(e) => { eprintln!("[lexicon] parse {}: {}", p, e); HashMap::new() }
         },
-        Err(erro) => {
-            eprintln!("[lexicon] erro lendo {}: {}", p, erro);
-            HashMap::new()
-        }
+        Err(e) => { eprintln!("[lexicon] ler {}: {}", p, e); HashMap::new() }
     }
 }
 
-fn rebuild_cache(estado: &mut Estado) {
-    estado.lexicon_cached.clear();
-    estado.lexicon_cached_contexto.clear();
-
-    for (voice, voice_lex) in &estado.lexicon_voices {
-        let mut merged = (*estado.lexicon_base).clone();
-        for (k, v) in voice_lex.iter() {
-            merged.insert(k.clone(), v.clone());
-        }
-        estado
-            .lexicon_cached
-            .insert(voice.clone(), Arc::new(merged));
+fn rebuild_cache(e: &mut Estado) {
+    e.lexicon_cached.clear();
+    e.lexicon_cached_contexto.clear();
+    for (v, vl) in &e.lexicon_voices {
+        let mut m = (*e.lexicon_base).clone();
+        for (k, val) in vl.iter() { m.insert(k.clone(), val.clone()); }
+        e.lexicon_cached.insert(v.clone(), Arc::new(m));
     }
-
-    for (voice, voice_lex) in &estado.lexicon_voices_contexto {
-        let mut merged = (*estado.lexicon_base_contexto).clone();
-        for (k, v) in voice_lex.iter() {
-            merged.insert(k.clone(), v.clone());
-        }
-        estado
-            .lexicon_cached_contexto
-            .insert(voice.clone(), Arc::new(merged));
+    for (v, vl) in &e.lexicon_voices_contexto {
+        let mut m = (*e.lexicon_base_contexto).clone();
+        for (k, val) in vl.iter() { m.insert(k.clone(), val.clone()); }
+        e.lexicon_cached_contexto.insert(v.clone(), Arc::new(m));
     }
-
-    estado
-        .lexicon_cached
-        .insert("__default__".to_string(), Arc::clone(&estado.lexicon_base));
-    estado.lexicon_cached_contexto.insert(
-        "__default__".to_string(),
-        Arc::clone(&estado.lexicon_base_contexto),
-    );
+    e.lexicon_cached.insert("__default__".to_string(), Arc::clone(&e.lexicon_base));
+    e.lexicon_cached_contexto.insert("__default__".to_string(),
+                                     Arc::clone(&e.lexicon_base_contexto));
 }
 
-fn get_lexicons_for(
-    estado: &Estado,
-    voice: &str,
-    overrides: &HashMap<String, String>,
-) -> (Arc<HashMap<String, String>>, Arc<HashMap<String, String>>) {
-    let cached_iso = estado
-        .lexicon_cached
-        .get(voice)
-        .or_else(|| estado.lexicon_cached.get("__default__"))
-        .cloned()
-        .unwrap_or_else(|| Arc::clone(&estado.lexicon_base));
-
-    let cached_ctx = estado
-        .lexicon_cached_contexto
-        .get(voice)
-        .or_else(|| estado.lexicon_cached_contexto.get("__default__"))
-        .cloned()
-        .unwrap_or_else(|| Arc::clone(&estado.lexicon_base_contexto));
-
-    if overrides.is_empty() {
-        return (cached_iso, cached_ctx);
-    }
-
-    let mut merged_iso = (*cached_iso).clone();
-    let mut merged_ctx = (*cached_ctx).clone();
-    for (k, v) in overrides {
-        merged_iso.insert(k.clone(), v.clone());
-        merged_ctx.insert(k.clone(), v.clone());
-    }
-
-    (Arc::new(merged_iso), Arc::new(merged_ctx))
+fn get_lexicons_for(e: &Estado, voice: &str, overrides: &HashMap<String, String>)
+    -> (Arc<HashMap<String, String>>, Arc<HashMap<String, String>>)
+{
+    let ci = e.lexicon_cached.get(voice)
+        .or_else(|| e.lexicon_cached.get("__default__")).cloned()
+        .unwrap_or_else(|| Arc::clone(&e.lexicon_base));
+    let cc = e.lexicon_cached_contexto.get(voice)
+        .or_else(|| e.lexicon_cached_contexto.get("__default__")).cloned()
+        .unwrap_or_else(|| Arc::clone(&e.lexicon_base_contexto));
+    if overrides.is_empty() { return (ci, cc); }
+    let mut mi = (*ci).clone(); let mut mc = (*cc).clone();
+    for (k, v) in overrides { mi.insert(k.clone(), v.clone()); mc.insert(k.clone(), v.clone()); }
+    (Arc::new(mi), Arc::new(mc))
 }
 
-/// Caminhos padrão onde procurar um arquivo com o nome dado.
 fn caminhos_arquivo(nome: &str) -> Vec<PathBuf> {
-    let mut caminhos = Vec::new();
-
+    let mut c = Vec::new();
     let stem = nome.trim_end_matches(".json").to_uppercase();
-    let var = format!("VOZZ_{}", stem);
-    if let Ok(caminho) = std::env::var(&var) {
-        if !caminho.is_empty() {
-            caminhos.push(PathBuf::from(caminho));
-        }
+    if let Ok(p) = std::env::var(&format!("VOZZ_{}", stem)) {
+        if !p.is_empty() { c.push(PathBuf::from(p)); }
     }
-
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            caminhos.push(dir.join(nome));
-        }
+        if let Some(d) = exe.parent() { c.push(d.join(nome)); }
     }
-
-    caminhos.push(PathBuf::from(nome));
-    caminhos.push(PathBuf::from("data").join(nome));
-    caminhos.push(PathBuf::from("cache").join(nome));
-
-    caminhos
+    c.push(PathBuf::from(nome));
+    c.push(PathBuf::from("data").join(nome));
+    c.push(PathBuf::from("cache").join(nome));
+    c
 }
 
 fn carregar_arquivo(nome: &str) -> Option<(PathBuf, HashMap<String, String>)> {
-    for caminho in caminhos_arquivo(nome) {
-        if !caminho.is_file() {
-            continue;
-        }
-        match std::fs::read_to_string(&caminho) {
-            Ok(conteudo) => match serde_json::from_str::<HashMap<String, String>>(&conteudo) {
-                Ok(mapa) if !mapa.is_empty() => {
-                    return Some((caminho, mapa));
-                }
-                _ => continue,
-            },
-            Err(_) => continue,
+    for c in caminhos_arquivo(nome) {
+        if !c.is_file() { continue; }
+        if let Ok(s) = std::fs::read_to_string(&c) {
+            if let Ok(m) = serde_json::from_str::<HashMap<String, String>>(&s) {
+                if !m.is_empty() { return Some((c, m)); }
+            }
         }
     }
     None
 }
 
 fn carregar_homografos_lexico() -> Option<(LexiconHomografos, PathBuf)> {
-    let path = caminhos_arquivo("lexicon_homografos.json")
-        .into_iter()
+    let path = caminhos_arquivo("lexicon_homografos.json").into_iter()
         .find(|p| p.is_file())?;
-    match LexiconHomografos::from_path(&path) {
-        Ok(l) => Some((l, path)),
-        Err(erro) => {
-            eprintln!("[homografos] erro: {}", erro);
-            None
-        }
-    }
+    LexiconHomografos::from_path(&path).ok().map(|l| (l, path))
 }
-
-// ---------------------------------------------------------------------------
-// Tagger (via lib do BCDE-tagger)
-// ---------------------------------------------------------------------------
 
 fn caminhos_tagger_data() -> Vec<String> {
     let mut v = Vec::new();
-
     if let Ok(p) = std::env::var("BCDE_TAGGER_DATA") {
-        if !p.is_empty() {
-            v.push(p);
-        }
+        if !p.is_empty() { v.push(p); }
     }
-
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            v.push(
-                dir.join("../BCDE-tagger/data")
-                    .to_string_lossy()
-                    .to_string(),
-            );
-            v.push(dir.join("data").to_string_lossy().to_string());
+        if let Some(d) = exe.parent() {
+            v.push(d.join("../BCDE-tagger/data").to_string_lossy().to_string());
+            v.push(d.join("data").to_string_lossy().to_string());
         }
     }
-
     v.push("/content/BCDE-tagger/data".to_string());
     v.push("data".to_string());
     v
@@ -281,414 +166,231 @@ fn caminhos_tagger_data() -> Vec<String> {
 
 fn carregar_tagger() -> Option<Tagger> {
     for data in caminhos_tagger_data() {
-        if !std::path::Path::new(&data).is_dir() {
-            continue;
-        }
-        match tagger::carregar_tagger(&data) {
-            Ok(t) => {
-                eprintln!("[tagger] BCDE carregado de {}", data);
-                return Some(t);
-            }
-            Err(erro) => {
-                eprintln!("[tagger] falha em {}: {}", data, erro);
-            }
+        if !std::path::Path::new(&data).is_dir() { continue; }
+        match vozz_g2p_rs::tagger::carregar_tagger(&data) {
+            Ok(t) => { eprintln!("[tagger] carregado de {}", data); return Some(t); }
+            Err(e) => eprintln!("[tagger] falha em {}: {}", data, e),
         }
     }
     None
 }
 
-// ---------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------
+// ─── Handlers ─────────────────────────────────────────────────────────
 
-fn handle_set_lexicon(estado: &mut Estado, req: &Value) {
+fn handle_set_lexicon(e: &mut Estado, req: &Value) {
     let t0 = Instant::now();
+    let base = carregar_json_seguro(&req.get("base_path").and_then(|v| v.as_str()).map(String::from));
+    let global = carregar_json_seguro(&req.get("global_path").and_then(|v| v.as_str()).map(String::from));
+    let ctx = carregar_json_seguro(&req.get("context_path").and_then(|v| v.as_str()).map(String::from));
+    let mut lb = base;
+    for (k, v) in global { lb.insert(k, v); }
+    e.lexicon_base = Arc::new(lb);
+    e.lexicon_base_contexto = Arc::new(ctx);
+    e.lexicon_voices.clear();
+    e.lexicon_voices_contexto.clear();
 
-    let base_path = req
-        .get("base_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let base = carregar_json_seguro(&base_path);
-
-    let global_path = req
-        .get("global_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let global = carregar_json_seguro(&global_path);
-
-    let context_path = req
-        .get("context_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let contexto = carregar_json_seguro(&context_path);
-
-    let t_global = Instant::now();
-
-    let mut lexicon_base = base;
-    for (k, v) in global {
-        lexicon_base.insert(k, v);
-    }
-    estado.lexicon_base = Arc::new(lexicon_base);
-    estado.lexicon_base_contexto = Arc::new(contexto);
-
-    estado.lexicon_voices.clear();
-    estado.lexicon_voices_contexto.clear();
-
-    if let Some(voice_paths) = req.get("voice_paths").and_then(|v| v.as_object()) {
-        for (voice, path_val) in voice_paths {
-            if let Some(path) = path_val.as_str() {
-                let voice_lex = carregar_json_seguro(&Some(path.to_string()));
-                if !voice_lex.is_empty() {
-                    estado
-                        .lexicon_voices
-                        .insert(voice.clone(), Arc::new(voice_lex));
-                }
+    if let Some(vp) = req.get("voice_paths").and_then(|v| v.as_object()) {
+        for (v, pv) in vp {
+            if let Some(p) = pv.as_str() {
+                let vl = carregar_json_seguro(&Some(p.to_string()));
+                if !vl.is_empty() { e.lexicon_voices.insert(v.clone(), Arc::new(vl)); }
             }
         }
     }
-
-    if let Some(voice_paths_ctx) = req
-        .get("voice_paths_contexto")
-        .and_then(|v| v.as_object())
-    {
-        for (voice, path_val) in voice_paths_ctx {
-            if let Some(path) = path_val.as_str() {
-                let voice_lex = carregar_json_seguro(&Some(path.to_string()));
-                if !voice_lex.is_empty() {
-                    estado
-                        .lexicon_voices_contexto
-                        .insert(voice.clone(), Arc::new(voice_lex));
-                }
+    if let Some(vp) = req.get("voice_paths_contexto").and_then(|v| v.as_object()) {
+        for (v, pv) in vp {
+            if let Some(p) = pv.as_str() {
+                let vl = carregar_json_seguro(&Some(p.to_string()));
+                if !vl.is_empty() { e.lexicon_voices_contexto.insert(v.clone(), Arc::new(vl)); }
             }
         }
     }
-
-    rebuild_cache(estado);
-    let t_end = Instant::now();
-
-    eprintln!(
-        "[lexicon] base={} | contexto={} | vozes={} (+{} contexto) | cache={}/{}",
-        estado.lexicon_base.len(),
-        estado.lexicon_base_contexto.len(),
-        estado.lexicon_voices.len(),
-        estado.lexicon_voices_contexto.len(),
-        estado.lexicon_cached.len(),
-        estado.lexicon_cached_contexto.len()
-    );
-    eprintln!(
-        "[lexicon-timing] ler={}ms rebuild_cache={}ms total={}ms",
-        (t_global - t0).as_millis(),
-        (t_end - t_global).as_millis(),
-        (t_end - t0).as_millis()
-    );
+    rebuild_cache(e);
+    eprintln!("[lexicon] base={} ctx={} vozes={} (+{} ctx) tempo={}ms",
+        e.lexicon_base.len(), e.lexicon_base_contexto.len(),
+        e.lexicon_voices.len(), e.lexicon_voices_contexto.len(),
+        t0.elapsed().as_millis());
 }
 
 fn extrair_overrides(req: &Value) -> HashMap<String, String> {
-    req.get("overrides")
-        .and_then(|v| v.as_object())
-        .map(|objeto| {
-            objeto
-                .iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
+    req.get("overrides").and_then(|v| v.as_object())
+        .map(|o| o.iter().filter_map(|(k, v)| v.as_str()
+            .map(|s| (k.clone(), s.to_string()))).collect())
         .unwrap_or_default()
 }
 
-fn opcoes_para<'a>(
-    estado: &'a Estado,
-    lexico: &'a HashMap<String, String>,
-    lexico_contexto: &'a HashMap<String, String>,
-) -> OpcoesFonemizar<'a> {
+fn opcoes_para<'a>(e: &'a Estado, l: &'a HashMap<String, String>,
+                    lc: &'a HashMap<String, String>) -> OpcoesFonemizar<'a> {
     OpcoesFonemizar {
         normalizar: false,
-        lexico: Some(lexico),
-        lexico_contexto: Some(lexico_contexto),
-        homografos: estado.homografos.as_ref(),
-        tagger: estado.tagger.as_ref(),
+        lexico: Some(l),
+        lexico_contexto: Some(lc),
+        homografos: e.homografos.as_ref(),
+        tagger: e.tagger.as_ref(),
     }
 }
 
-fn handle_process(estado: &Estado, req: &Value) -> RespostaProcesso {
-    let t0 = Instant::now();
+fn handle_process(e: &Estado, req: &Value) -> RespostaProcesso {
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let overrides = extrair_overrides(req);
+    let (l, lc) = get_lexicons_for(e, &voice, &overrides);
+    let norm = normalizar(&text, OpcoesNormalizar::default());
+    let sents = dividir_em_sentencas(&norm);
+    let mut out = Vec::with_capacity(sents.len());
+    for s in &sents {
+        let o = opcoes_para(e, &l, &lc);
+        out.push(Sentenca { text: s.to_string(), phonemes: fonemizar(s, &o) });
+    }
+    RespostaProcesso { sentences: out }
+}
 
-    let text = req
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let voice = req
-        .get("voice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+fn handle_process_piper(e: &Estado, req: &Value) -> RespostaProcessoPiper {
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let overrides = extrair_overrides(req);
+    let (l, lc) = get_lexicons_for(e, &voice, &overrides);
+    let norm = normalizar(&text, OpcoesNormalizar::default());
+    let sents = dividir_em_sentencas(&norm);
+    let mut out = Vec::with_capacity(sents.len());
+    for s in &sents {
+        let o = opcoes_para(e, &l, &lc);
+        let ipa = fonemizar(s, &o);
+        out.push(SentencaPiper { text: s.to_string(), phonemes: ipa_para_piper(&ipa) });
+    }
+    RespostaProcessoPiper { sentences: out }
+}
+
+/// NOVO: devolve chunks com pausas prontos para síntese.
+///
+/// Request:
+///   {"action":"process_piper_chunks","text":"...","voice":"","emocao":"neutro",
+///    "overrides":{}}
+///
+/// Response:
+///   {
+///     "ipa_completo": "...",
+///     "emocao": "neutro",
+///     "chunks": [ { "fragments":[{"ipa":"...","pausa_ms":180}, ...],
+///                   "length_scale":1.0,
+///                   "pausa_apos_ms":500 }, ... ]
+///   }
+fn handle_process_piper_chunks(e: &Estado, req: &Value) -> Value {
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let voice = req.get("voice").and_then(|v| v.as_str()).unwrap_or("");
+    let emocao = req.get("emocao").and_then(|v| v.as_str()).unwrap_or("neutro");
     let overrides = extrair_overrides(req);
 
-    let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
-    let t_lex = Instant::now();
+    let (l, lc) = get_lexicons_for(e, voice, &overrides);
+    let norm = normalizar(text, OpcoesNormalizar::default());
+    let sents = dividir_em_sentencas(&norm);
 
-    let normalizado = normalizar(&text, OpcoesNormalizar::default());
-    let t_normalizar = Instant::now();
-
-    let sentencas = dividir_em_sentencas(&normalizado);
-    let t_dividir = Instant::now();
-
-    let mut sentences: Vec<Sentenca> = Vec::with_capacity(sentencas.len());
-    for s in &sentencas {
-        let ts = Instant::now();
-        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
-        let phon = fonemizar(s, &opcoes);
-        let dt = ts.elapsed().as_millis();
-
-        if dt > SLOW_THRESHOLD_MS {
-            let preview: String = if s.chars().count() > 40 {
-                let mut p: String = s.chars().take(40).collect();
-                p.push('…');
-                p
-            } else {
-                s.to_string()
-            };
-            eprintln!("[slow] fonemizar('{}') = {}ms", preview, dt);
-        }
-
-        sentences.push(Sentenca {
-            text: s.to_string(),
-            phonemes: phon,
-        });
+    // Concatena o IPA de todas as sentenças, preservando pontuação.
+    let mut ipa_full = String::new();
+    for s in &sents {
+        let o = opcoes_para(e, &l, &lc);
+        let ipa = fonemizar(s, &o);
+        if !ipa_full.is_empty() { ipa_full.push(' '); }
+        ipa_full.push_str(ipa.trim());
     }
-    let t_fonemizar = Instant::now();
 
-    eprintln!(
-        "[timing] lex={}ms normalizar={}ms dividir={}ms fonemizar={}ms ({}s) total={}ms",
-        (t_lex - t0).as_millis(),
-        (t_normalizar - t_lex).as_millis(),
-        (t_dividir - t_normalizar).as_millis(),
-        (t_fonemizar - t_dividir).as_millis(),
-        sentencas.len(),
-        (t_fonemizar - t0).as_millis()
-    );
+    let chunks = preparar_chunks(&ipa_full, emocao);
 
-    RespostaProcesso { sentences }
+    serde_json::json!({
+        "ipa_completo": ipa_full,
+        "emocao": emocao,
+        "chunks": chunks,
+    })
 }
 
-fn handle_process_piper(estado: &Estado, req: &Value) -> RespostaProcessoPiper {
-    let text = req
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let voice = req
-        .get("voice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+fn handle_process_batch(e: &Estado, req: &Value) -> RespostaBatch {
+    let voz = req.get("voice").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let overrides = extrair_overrides(req);
-
-    let (lexico, lexico_contexto) = get_lexicons_for(estado, &voice, &overrides);
-
-    let normalizado = normalizar(&text, OpcoesNormalizar::default());
-    let sentencas = dividir_em_sentencas(&normalizado);
-
-    let mut sentences: Vec<SentencaPiper> = Vec::with_capacity(sentencas.len());
-    for s in &sentencas {
-        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
-        let ipa = fonemizar(s, &opcoes);
-        let tokens = ipa_para_piper(&ipa);
-        sentences.push(SentencaPiper {
-            text: s.to_string(),
-            phonemes: tokens,
-        });
-    }
-
-    RespostaProcessoPiper { sentences }
-}
-
-fn handle_process_batch(estado: &Estado, requisicao: &Value) -> RespostaBatch {
-    let voz = requisicao
-        .get("voice")
-        .and_then(|valor| valor.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let overrides = extrair_overrides(requisicao);
-    let (lexico, lexico_contexto) = get_lexicons_for(estado, &voz, &overrides);
-
-    let palavras: Vec<String> = requisicao
-        .get("words")
-        .and_then(|valor| valor.as_array())
-        .map(|array| {
-            array
-                .iter()
-                .filter_map(|valor| valor.as_str().map(|texto| texto.to_string()))
-                .collect()
-        })
+    let (l, lc) = get_lexicons_for(e, &voz, &overrides);
+    let palavras: Vec<String> = req.get("words").and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-
     let total = palavras.len();
-    let mut fonemas: HashMap<String, String> = HashMap::with_capacity(total);
-
-    let inicio_loop = Instant::now();
-
-    for palavra in &palavras {
-        let entrada = if precisa_normalizar(palavra) {
-            normalizar(palavra, OpcoesNormalizar::default())
-        } else {
-            palavra.clone()
-        };
-
-        let opcoes = opcoes_para(estado, &lexico, &lexico_contexto);
-        let fonema = fonemizar(&entrada, &opcoes);
-        fonemas.insert(palavra.clone(), fonema);
+    let mut fonemas = HashMap::with_capacity(total);
+    let t0 = Instant::now();
+    for p in &palavras {
+        let entrada = if precisa_normalizar(p) {
+            normalizar(p, OpcoesNormalizar::default())
+        } else { p.clone() };
+        let o = opcoes_para(e, &l, &lc);
+        fonemas.insert(p.clone(), fonemizar(&entrada, &o));
     }
-
-    let tempo_decorrido_ms = inicio_loop.elapsed().as_millis();
-
-    eprintln!(
-        "[batch] {} palavras | loop={}ms | {:.1}us/palavra",
-        total,
-        tempo_decorrido_ms,
-        if total > 0 {
-            (tempo_decorrido_ms as f64 * 1000.0) / total as f64
-        } else {
-            0.0
-        }
-    );
-
-    RespostaBatch {
-        phonemes: fonemas,
-        timing_ms: tempo_decorrido_ms,
-        total,
-    }
+    let dt = t0.elapsed().as_millis();
+    RespostaBatch { phonemes: fonemas, timing_ms: dt, total }
 }
 
-// ---------------------------------------------------------------------------
-// Loop principal
-// ---------------------------------------------------------------------------
+// ─── Main ─────────────────────────────────────────────────────────────
 
 fn main() {
     let mut estado = Estado::novo();
 
-    if let Some((caminho, lexico)) = carregar_arquivo("lexico_espeak.json") {
-        eprintln!(
-            "[lexicon] auto-carregado base: {} ({} entradas)",
-            caminho.display(),
-            lexico.len()
-        );
-        estado.lexicon_base = Arc::new(lexico);
-    } else {
-        eprintln!("[lexicon] nenhum lexico_espeak.json encontrado");
+    if let Some((c, l)) = carregar_arquivo("lexico_espeak.json") {
+        eprintln!("[lexicon] base: {} ({} entradas)", c.display(), l.len());
+        estado.lexicon_base = Arc::new(l);
     }
-
-    if let Some((caminho, lexico)) = carregar_arquivo("lexico_espeak_contexto.json") {
-        eprintln!(
-            "[lexicon] auto-carregado contexto: {} ({} entradas)",
-            caminho.display(),
-            lexico.len()
-        );
-        estado.lexicon_base_contexto = Arc::new(lexico);
-    } else {
-        eprintln!("[lexicon] nenhum lexico_espeak_contexto.json encontrado");
+    if let Some((c, l)) = carregar_arquivo("lexico_espeak_contexto.json") {
+        eprintln!("[lexicon] ctx: {} ({} entradas)", c.display(), l.len());
+        estado.lexicon_base_contexto = Arc::new(l);
     }
-
-    if let Some((hom, path)) = carregar_homografos_lexico() {
-        eprintln!(
-            "[homografos] lexicon carregado: {} ({} palavras)",
-            path.display(),
-            hom.len()
-        );
-        estado.homografos = Some(hom);
-    } else {
-        eprintln!("[homografos] lexicon_homografos.json não encontrado");
+    if let Some((h, p)) = carregar_homografos_lexico() {
+        eprintln!("[homografos] {} ({} palavras)", p.display(), h.len());
+        estado.homografos = Some(h);
     }
-
     match carregar_tagger() {
         Some(t) => estado.tagger = Some(t),
-        None => eprintln!("[tagger] BCDE-tagger NÃO carregado — sentidos virão vazios"),
+        None => eprintln!("[tagger] BCDE NÃO carregado"),
     }
-
     rebuild_cache(&mut estado);
 
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut stdout_lock = stdout.lock();
+    let mut out = stdout.lock();
 
     for line_res in stdin.lock().lines() {
-        let line = match line_res {
-            Ok(l) => l,
-            Err(erro) => {
-                eprintln!("[worker] erro lendo stdin: {}", erro);
-                break;
-            }
-        };
-
-        if line.trim().is_empty() {
-            continue;
-        }
+        let line = match line_res { Ok(l) => l, Err(_) => break };
+        if line.trim().is_empty() { continue; }
 
         let req: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(erro) => {
-                let resp = RespostaErro {
-                    error: format!("JSON parse: {} (build {})", erro, BUILD_ID),
-                };
-                let json = serde_json::to_string(&resp)
-                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string());
-                let _ = writeln!(stdout_lock, "{}", json);
-                let _ = stdout_lock.flush();
-                continue;
+            Err(e) => {
+                let r = serde_json::json!({"error": format!("JSON parse: {} (build {})", e, BUILD_ID)});
+                let _ = writeln!(out, "{}", r); let _ = out.flush(); continue;
             }
         };
 
         let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
-
         let resposta: String = match action {
             "version" => serde_json::to_string(&serde_json::json!({
                 "build": BUILD_ID,
-                "features": [
-                    "set_lexicon",
-                    "process",
-                    "process_piper",
-                    "process_batch",
-                    "tagger",
-                    "trema",
-                ],
-            }))
-            .unwrap_or_else(|_| "{\"build\":\"unknown\"}".to_string()),
+                "features": ["set_lexicon", "process", "process_piper",
+                             "process_piper_chunks", "process_batch",
+                             "tagger", "trema"],
+            })).unwrap_or_else(|_| "{}".to_string()),
 
             "set_lexicon" => {
                 handle_set_lexicon(&mut estado, &req);
-                serde_json::to_string(&RespostaOk { ok: true })
-                    .unwrap_or_else(|_| "{\"ok\":true}".to_string())
+                serde_json::to_string(&RespostaOk { ok: true }).unwrap_or_else(|_| "{\"ok\":true}".to_string())
             }
-
-            "process" => {
-                let r = handle_process(&estado, &req);
-                serde_json::to_string(&r)
-                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
+            "process" => serde_json::to_string(&handle_process(&estado, &req))
+                .unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string()),
+            "process_piper" => serde_json::to_string(&handle_process_piper(&estado, &req))
+                .unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string()),
+            "process_piper_chunks" => {
+                let r = handle_process_piper_chunks(&estado, &req);
+                serde_json::to_string(&r).unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string())
             }
-
-            "process_piper" => {
-                let r = handle_process_piper(&estado, &req);
-                serde_json::to_string(&r)
-                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
-            }
-
-            "process_batch" => {
-                let r = handle_process_batch(&estado, &req);
-                serde_json::to_string(&r)
-                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
-            }
-
-            other => {
-                let r = RespostaErro {
-                    error: format!("Unknown action: {} (build {})", other, BUILD_ID),
-                };
-                serde_json::to_string(&r)
-                    .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
-            }
+            "process_batch" => serde_json::to_string(&handle_process_batch(&estado, &req))
+                .unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string()),
+            other => serde_json::to_string(&RespostaErro {
+                error: format!("Unknown action: {} (build {})", other, BUILD_ID),
+            }).unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string()),
         };
-
-        let _ = writeln!(stdout_lock, "{}", resposta);
-        let _ = stdout_lock.flush();
+        let _ = writeln!(out, "{}", resposta);
+        let _ = out.flush();
     }
 }
